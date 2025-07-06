@@ -34,7 +34,8 @@ async fn main() -> anyhow::Result<()> {
     let queue = Arc::new(QueueManager::<String>::new());
 
     let app = Router::new()
-        .route("/api/queue", post(queue_handler))
+        .route("/api/queue_merged", post(queue_merged_handler))
+        .route("/api/queue_split", post(queue_split_handler))
         .route("/api/queue_file", post(queue_file_handler))
         .route("/api/cancel", post(cancel_current_handler))
         .route("/api/cancel/{id}", post(cancel_id_handler))
@@ -54,26 +55,51 @@ struct QueuePayload {
     height: Option<u32>,
 }
 
-async fn queue_handler(
+async fn queue_merged_handler(
     State(queue): State<Arc<QueueManager<String>>>,
     Json(payload): Json<QueuePayload>,
 ) -> Result<String, AppError> {
-    let min_height = payload.height.unwrap_or(480);
-    let title = Video::get_merged_url(&payload.url, MinHeight(min_height))
-        .await?
-        .title;
-
-    info!("queued {title}");
+    let url = payload.url.clone();
+    info!("queued {url}");
 
     let uuid = queue
         .submit(
             async move || {
                 // the first run is just to get the title, we're running it again in case the URLs expire
-                let track = Video::get_split_urls(&payload.url, MinHeight(min_height)).await?;
+                let track =
+                    Video::get_merged_url(&payload.url, MinHeight(payload.height.unwrap_or(480)))
+                        .await?;
+                info!("starting {}", track.title);
+                VlcClient::default()
+                    .oneshot(Track::MergedTrack(track))
+                    .await
+            },
+            url,
+            async move || {},
+        )
+        .await;
+
+    Ok(uuid.to_string())
+}
+
+async fn queue_split_handler(
+    State(queue): State<Arc<QueueManager<String>>>,
+    Json(payload): Json<QueuePayload>,
+) -> Result<String, AppError> {
+    let url = payload.url.clone();
+    info!("queued {url}");
+
+    let uuid = queue
+        .submit(
+            async move || {
+                // the first run is just to get the title, we're running it again in case the URLs expire
+                let track =
+                    Video::get_split_urls(&payload.url, MinHeight(payload.height.unwrap_or(480)))
+                        .await?;
                 info!("starting {}", track.title);
                 VlcClient::default().oneshot(Track::SplitTrack(track)).await
             },
-            title,
+            url,
             async move || {},
         )
         .await;
