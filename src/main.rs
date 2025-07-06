@@ -51,13 +51,15 @@ async fn main() -> anyhow::Result<()> {
 #[derive(Deserialize)]
 struct QueuePayload {
     url: String,
+    height: Option<u32>,
 }
 
 async fn queue_handler(
     State(queue): State<Arc<QueueManager<String>>>,
     Json(payload): Json<QueuePayload>,
 ) -> Result<String, AppError> {
-    let title = Video::get_merged_url(&payload.url, MinHeight(720))
+    let min_height = payload.height.unwrap_or(480);
+    let title = Video::get_merged_url(&payload.url, MinHeight(min_height))
         .await?
         .title;
 
@@ -67,7 +69,7 @@ async fn queue_handler(
         .submit(
             async move || {
                 // the first run is just to get the title, we're running it again in case the URLs expire
-                let track = Video::get_split_urls(&payload.url, MinHeight(720)).await?;
+                let track = Video::get_split_urls(&payload.url, MinHeight(min_height)).await?;
                 info!("starting {}", track.title);
                 VlcClient::default().oneshot(Track::SplitTrack(track)).await
             },
@@ -83,7 +85,8 @@ async fn queue_file_handler(
     State(queue): State<Arc<QueueManager<String>>>,
     Json(payload): Json<QueuePayload>,
 ) -> Result<String, AppError> {
-    let title = Video::get_merged_url(&payload.url, MinHeight(720))
+    let min_height = payload.height.unwrap_or(480);
+    let title = Video::get_merged_url(&payload.url, MinHeight(min_height))
         .await?
         .title;
     info!("queued {title}");
@@ -91,7 +94,7 @@ async fn queue_file_handler(
     let mut temp_file = NamedTempFile::new().map_err(|e| anyhow::anyhow!(e))?;
     temp_file.disable_cleanup(true);
     let temp_file_clone = temp_file.as_ref().to_owned();
-    Video::download_file(&temp_file, &payload.url, MinHeight(720)).await?;
+    Video::download_file(&temp_file, &payload.url, MinHeight(min_height)).await?;
     let title_clone = title.clone();
 
     let uuid = queue
