@@ -12,7 +12,10 @@ use axum::{
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
-use tower_http::compression::CompressionLayer;
+use tower_http::{
+    compression::CompressionLayer,
+    services::{ServeDir, ServeFile},
+};
 use uuid::Uuid;
 
 use crate::{
@@ -36,6 +39,9 @@ async fn main() -> anyhow::Result<()> {
     // VlcClient::default().launch().await?;
     let queue = Arc::new(QueueManager::new());
 
+    let serve_app =
+        ServeDir::new("ui/dist").not_found_service(ServeFile::new("ui/dist/index.html"));
+
     let app = Router::new()
         .route("/api/queue_merged", post(queue_merged_handler))
         .route("/api/queue_split", post(queue_split_handler))
@@ -45,7 +51,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/clear", post(clear_handler))
         .route("/api/inspect", get(inspect_handler))
         .layer(CompressionLayer::new())
-        .with_state(queue);
+        .with_state(queue)
+        .fallback_service(serve_app);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     axum::serve(listener, app).await?;

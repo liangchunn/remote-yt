@@ -12,10 +12,10 @@ import {
 import type { VideoType } from "@/types/queue";
 
 const QUALITY_TO_MIN_HEIGHT = {
-  sd: 360,
+  sd: 480,
   hd: 720,
   fhd: 1080,
-  sd_s: 360,
+  sd_s: 480,
 };
 
 export function Form({
