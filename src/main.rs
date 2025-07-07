@@ -10,18 +10,21 @@ use axum::{
     routing::{get, post},
 };
 use log::{error, info};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
+use tower_http::compression::CompressionLayer;
 use uuid::Uuid;
 
 use crate::{
     format::MinHeight,
+    meta::{InspectMetadata, Metadata},
     queue::QueueManager,
     vlc::VlcClient,
     yt_dlp::{Track, Video},
 };
 
 mod format;
+mod meta;
 mod queue;
 mod vlc;
 mod yt_dlp;
@@ -31,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     // VlcClient::default().launch().await?;
-    let queue = Arc::new(QueueManager::<String>::new());
+    let queue = Arc::new(QueueManager::new());
 
     let app = Router::new()
         .route("/api/queue_merged", post(queue_merged_handler))
@@ -41,6 +44,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/cancel/{id}", post(cancel_id_handler))
         .route("/api/clear", post(clear_handler))
         .route("/api/inspect", get(inspect_handler))
+        .layer(CompressionLayer::new())
         .with_state(queue);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
@@ -55,12 +59,24 @@ struct QueuePayload {
     height: Option<u32>,
 }
 
+#[derive(Serialize)]
+struct QueueResponse {
+    job_id: Uuid,
+}
+
 async fn queue_merged_handler(
-    State(queue): State<Arc<QueueManager<String>>>,
+    State(queue): State<Arc<QueueManager>>,
     Json(payload): Json<QueuePayload>,
-) -> Result<String, AppError> {
+) -> Result<Json<QueueResponse>, AppError> {
     let url = payload.url.clone();
     info!("queued {url}");
+
+    let merged_track =
+        Video::get_merged_url(&payload.url, MinHeight(payload.height.unwrap_or(480))).await?;
+
+    let title = merged_track.title;
+    let channel = merged_track.channel;
+    let uploader_id = merged_track.uploader_id;
 
     let uuid = queue
         .submit(
@@ -74,20 +90,32 @@ async fn queue_merged_handler(
                     .oneshot(Track::MergedTrack(track))
                     .await
             },
-            url,
+            Metadata {
+                url,
+                title,
+                channel,
+                uploader_id,
+            },
             async move || {},
         )
         .await;
 
-    Ok(uuid.to_string())
+    Ok(Json(QueueResponse { job_id: uuid }))
 }
 
 async fn queue_split_handler(
-    State(queue): State<Arc<QueueManager<String>>>,
+    State(queue): State<Arc<QueueManager>>,
     Json(payload): Json<QueuePayload>,
-) -> Result<String, AppError> {
+) -> Result<Json<QueueResponse>, AppError> {
     let url = payload.url.clone();
     info!("queued {url}");
+
+    let merged_track =
+        Video::get_merged_url(&payload.url, MinHeight(payload.height.unwrap_or(480))).await?;
+
+    let title = merged_track.title;
+    let channel = merged_track.channel;
+    let uploader_id = merged_track.uploader_id;
 
     let uuid = queue
         .submit(
@@ -99,29 +127,39 @@ async fn queue_split_handler(
                 info!("starting {}", track.title);
                 VlcClient::default().oneshot(Track::SplitTrack(track)).await
             },
-            url,
+            Metadata {
+                url,
+                title,
+                channel,
+                uploader_id,
+            },
             async move || {},
         )
         .await;
 
-    Ok(uuid.to_string())
+    Ok(Json(QueueResponse { job_id: uuid }))
 }
 
 async fn queue_file_handler(
-    State(queue): State<Arc<QueueManager<String>>>,
+    State(queue): State<Arc<QueueManager>>,
     Json(payload): Json<QueuePayload>,
-) -> Result<String, AppError> {
+) -> Result<Json<QueueResponse>, AppError> {
+    let url = payload.url.clone();
+    info!("queued {url}");
+
     let min_height = payload.height.unwrap_or(480);
-    let title = Video::get_merged_url(&payload.url, MinHeight(min_height))
-        .await?
-        .title;
-    info!("queued {title}");
+    let merged_track = Video::get_merged_url(&payload.url, MinHeight(min_height)).await?;
+
+    let title = merged_track.title;
+    let channel = merged_track.channel;
+    let uploader_id = merged_track.uploader_id;
 
     let mut temp_file = NamedTempFile::new().map_err(|e| anyhow::anyhow!(e))?;
     temp_file.disable_cleanup(true);
     let temp_file_clone = temp_file.as_ref().to_owned();
     Video::download_file(&temp_file, &payload.url, MinHeight(min_height)).await?;
     let title_clone = title.clone();
+    let title_clone_2 = title.clone();
 
     let uuid = queue
         .submit(
@@ -131,7 +169,12 @@ async fn queue_file_handler(
                     .oneshot(Track::FileTrack(&temp_file, title_clone))
                     .await
             },
-            title,
+            Metadata {
+                url: payload.url,
+                title: title_clone_2,
+                channel,
+                uploader_id,
+            },
             async move || {
                 match std::fs::remove_file(temp_file_clone.clone()) {
                     Ok(()) => info!("deleted file {}", temp_file_clone.display()),
@@ -141,10 +184,10 @@ async fn queue_file_handler(
         )
         .await;
 
-    Ok(uuid.to_string())
+    Ok(Json(QueueResponse { job_id: uuid }))
 }
 
-async fn cancel_current_handler(State(queue): State<Arc<QueueManager<String>>>) -> &'static str {
+async fn cancel_current_handler(State(queue): State<Arc<QueueManager>>) -> &'static str {
     if queue.cancel().await {
         "task cancelled"
     } else {
@@ -153,7 +196,7 @@ async fn cancel_current_handler(State(queue): State<Arc<QueueManager<String>>>) 
 }
 
 async fn cancel_id_handler(
-    State(queue): State<Arc<QueueManager<String>>>,
+    State(queue): State<Arc<QueueManager>>,
     Path(job_id): Path<Uuid>,
 ) -> &'static str {
     if queue.cancel_by_id(job_id).await {
@@ -163,15 +206,15 @@ async fn cancel_id_handler(
     }
 }
 
-async fn clear_handler(State(queue): State<Arc<QueueManager<String>>>) -> &'static str {
+async fn clear_handler(State(queue): State<Arc<QueueManager>>) -> &'static str {
     queue.clear().await;
     "queue cleared"
 }
 
-async fn inspect_handler(State(queue): State<Arc<QueueManager<String>>>) -> String {
+async fn inspect_handler(State(queue): State<Arc<QueueManager>>) -> Json<Vec<InspectMetadata>> {
     let items = queue.inspect().await;
 
-    serde_json::to_string(&items).unwrap()
+    Json(items)
 }
 
 // Wrapper type for anyhow::Error

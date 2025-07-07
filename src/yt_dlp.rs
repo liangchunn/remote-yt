@@ -96,6 +96,8 @@ impl Video {
 pub struct MergedTrack {
     pub title: String,
     pub merged_url: String,
+    pub channel: String,     // TODO: this shouldn't be here
+    pub uploader_id: String, // TODO: this shouldn't be here
 }
 
 impl TryFrom<JsonDump> for MergedTrack {
@@ -105,8 +107,15 @@ impl TryFrom<JsonDump> for MergedTrack {
         match value.url {
             Some(merged_url) => {
                 let title = value.title;
+                let channel = value.channel;
+                let uploader_id = value.uploader_id;
 
-                Ok(Self { title, merged_url })
+                Ok(Self {
+                    title,
+                    merged_url,
+                    channel,
+                    uploader_id,
+                })
             }
             None => Err(anyhow::anyhow!(
                 "expected url to be not empty, but was empty",
@@ -185,6 +194,8 @@ struct JsonDump {
     title: String,
     requested_formats: Option<Vec<RequestedFormat>>,
     url: Option<String>,
+    channel: String,
+    uploader_id: String,
 }
 
 #[derive(Deserialize)]

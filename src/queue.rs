@@ -145,33 +145,32 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::meta::{InspectMetadata, Metadata};
+
 type BoxedCommand = Box<dyn FnOnce() -> BoxFuture<'static, Result<Child, anyhow::Error>> + Send>;
 type CleanupFn = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;
 
-struct Job<T> {
+struct Job {
     pub id: Uuid,
-    pub metadata: T,
+    pub metadata: Metadata,
     pub task: BoxedCommand,
     pub cleanup: CleanupFn,
 }
 
-pub struct QueueManager<T> {
-    queue: Arc<Mutex<VecDeque<Job<T>>>>,
+pub struct QueueManager {
+    queue: Arc<Mutex<VecDeque<Job>>>,
     notify: Arc<Notify>,
     running: Arc<Mutex<Option<(Uuid, CancellationToken)>>>,
-    current: Arc<Mutex<Option<(Uuid, T)>>>,
+    current: Arc<Mutex<Option<(Uuid, Metadata)>>>,
     clear_requested: Arc<AtomicBool>,
 }
 
-impl<T: Send + 'static> QueueManager<T> {
-    pub fn new() -> Self
-    where
-        T: Clone + std::fmt::Display,
-    {
+impl QueueManager {
+    pub fn new() -> Self {
         let notify = Arc::new(Notify::new());
         let notify_ref = notify.clone();
 
-        let queue = Arc::new(Mutex::new(VecDeque::<Job<T>>::new()));
+        let queue = Arc::new(Mutex::new(VecDeque::<Job>::new()));
         let queue_ref = queue.clone();
 
         let running = Arc::new(Mutex::new(None));
@@ -197,12 +196,17 @@ impl<T: Send + 'static> QueueManager<T> {
                     }
                 };
 
-                info!("starting job {} with metadata {}", job.id, job.metadata);
+                info!("starting job {}", job.id);
 
                 let cancel_token = CancellationToken::new();
                 {
                     let mut lock = running_ref.lock().await;
                     *lock = Some((job.id, cancel_token.clone()));
+                }
+
+                {
+                    let mut current_lock = current_ref.lock().await;
+                    *current_lock = Some((job.id, job.metadata));
                 }
 
                 let mut child = match (job.task)().await {
@@ -212,11 +216,6 @@ impl<T: Send + 'static> QueueManager<T> {
                         continue;
                     }
                 };
-
-                {
-                    let mut current_lock = current_ref.lock().await;
-                    *current_lock = Some((job.id, job.metadata));
-                }
 
                 tokio::select! {
                     result = child.wait() => {
@@ -263,13 +262,12 @@ impl<T: Send + 'static> QueueManager<T> {
         }
     }
 
-    pub async fn submit<F, Fut, C, CFut>(&self, f: F, metadata: T, cleanup: C) -> Uuid
+    pub async fn submit<F, Fut, C, CFut>(&self, f: F, metadata: Metadata, cleanup: C) -> Uuid
     where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Result<Child, anyhow::Error>> + Send + 'static,
         C: FnOnce() -> CFut + Send + 'static,
         CFut: Future<Output = ()> + Send + 'static,
-        T: Send + 'static,
     {
         let task: BoxedCommand = Box::new(|| Box::pin(f()));
         let cleanup: CleanupFn = Box::new(|| Box::pin(cleanup()));
@@ -365,18 +363,29 @@ impl<T: Send + 'static> QueueManager<T> {
         self.clear_requested.store(true, Ordering::SeqCst);
     }
 
-    pub async fn inspect(&self) -> Vec<String>
-    where
-        T: Clone + std::fmt::Display,
-    {
+    pub async fn inspect(&self) -> Vec<InspectMetadata> {
         let mut result = vec![];
 
         if let Some((job_id, metadata)) = self.current.lock().await.clone() {
-            result.push(format!("[RUNNING] {job_id}: {metadata}"));
+            result.push(InspectMetadata {
+                job_id,
+                current: true,
+                title: metadata.title.clone(),
+                url: metadata.url.clone(),
+                channel: metadata.channel.clone(),
+                uploader_id: metadata.uploader_id.clone(),
+            })
         }
         let queue = self.queue.lock().await;
         for job in queue.iter() {
-            result.push(format!("{}: {}", job.id, job.metadata));
+            result.push(InspectMetadata {
+                job_id: job.id,
+                current: false,
+                title: job.metadata.title.clone(),
+                url: job.metadata.url.clone(),
+                channel: job.metadata.channel.clone(),
+                uploader_id: job.metadata.uploader_id.clone(),
+            });
         }
 
         result
