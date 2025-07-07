@@ -1,0 +1,19 @@
+@keyframes rotate {
+  to {
+    --angle: 360deg;
+  }
+}
+
+@property --angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.bbbb {
+  border: 2px solid transparent;
+  background:
+    linear-gradient(white, white) padding-box, /* Replace #fff with your actual background */
+    linear-gradient(var(--angle), #ba68c8, var(--border)) border-box;
+  animation: rotate 8s linear infinite;
+}

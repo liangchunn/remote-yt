@@ -1,6 +1,6 @@
 use glob::glob;
 use log::{error, info};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use tokio::process::Command;
 
@@ -28,12 +28,15 @@ impl Video {
         Ok(dump)
     }
 
-    pub async fn get_merged_url(link: &str, min_height: MinHeight) -> anyhow::Result<MergedTrack> {
+    pub async fn get_merged_track(
+        link: &str,
+        min_height: MinHeight,
+    ) -> anyhow::Result<MergedTrack> {
         let json = Self::get_json(link, Format::Merged, min_height).await?;
         json.try_into()
     }
 
-    pub async fn get_split_urls(link: &str, min_height: MinHeight) -> anyhow::Result<SplitTrack> {
+    pub async fn get_split_track(link: &str, min_height: MinHeight) -> anyhow::Result<SplitTrack> {
         let json = Self::get_json(link, Format::Split, min_height).await?;
         json.try_into()
     }
@@ -94,10 +97,8 @@ impl Video {
 
 #[derive(Debug)]
 pub struct MergedTrack {
-    pub title: String,
     pub merged_url: String,
-    pub channel: String,     // TODO: this shouldn't be here
-    pub uploader_id: String, // TODO: this shouldn't be here
+    pub track_info: TrackInfo,
 }
 
 impl TryFrom<JsonDump> for MergedTrack {
@@ -106,15 +107,21 @@ impl TryFrom<JsonDump> for MergedTrack {
     fn try_from(value: JsonDump) -> Result<Self, Self::Error> {
         match value.url {
             Some(merged_url) => {
-                let title = value.title;
-                let channel = value.channel;
-                let uploader_id = value.uploader_id;
+                let track_info = TrackInfo {
+                    title: value.title,
+                    channel: value.channel,
+                    uploader_id: value.uploader_id,
+                    acodec: value.acodec,
+                    vcodec: value.vcodec,
+                    height: value.height,
+                    width: value.width,
+                    thumbnail: value.thumbnail,
+                    track_type: TrackType::Merged,
+                };
 
                 Ok(Self {
-                    title,
                     merged_url,
-                    channel,
-                    uploader_id,
+                    track_info,
                 })
             }
             None => Err(anyhow::anyhow!(
@@ -126,9 +133,9 @@ impl TryFrom<JsonDump> for MergedTrack {
 
 #[derive(Debug)]
 pub struct SplitTrack {
-    pub title: String,
     pub audio_url: String,
     pub video_url: String,
+    pub track_info: TrackInfo,
 }
 
 impl TryFrom<JsonDump> for SplitTrack {
@@ -146,6 +153,10 @@ impl TryFrom<JsonDump> for SplitTrack {
 
                 let mut audio_url = None;
                 let mut video_url = None;
+                let mut vcodec = None;
+                let mut acodec = None;
+                let mut height = None;
+                let mut width = None;
 
                 for format in requested_formats {
                     match format.fps {
@@ -154,12 +165,16 @@ impl TryFrom<JsonDump> for SplitTrack {
                                 return Err(anyhow::anyhow!("multiple video formats found"));
                             }
                             video_url = Some(format.url);
+                            vcodec = Some(format.vcodec);
+                            height = format.height;
+                            width = format.width
                         }
                         None => {
                             if audio_url.is_some() {
                                 return Err(anyhow::anyhow!("multiple audio formats found"));
                             }
                             audio_url = Some(format.url);
+                            acodec = Some(format.acodec);
                         }
                     }
                 }
@@ -167,10 +182,22 @@ impl TryFrom<JsonDump> for SplitTrack {
                 let audio_url = audio_url.ok_or_else(|| anyhow::anyhow!("missing audio format"))?;
                 let video_url = video_url.ok_or_else(|| anyhow::anyhow!("missing video format"))?;
 
-                Ok(SplitTrack {
+                let track_info = TrackInfo {
                     title: value.title,
+                    channel: value.channel,
+                    uploader_id: value.uploader_id,
+                    acodec: acodec.unwrap_or_default(),
+                    vcodec: vcodec.unwrap_or_default(),
+                    height,
+                    width,
+                    thumbnail: value.thumbnail,
+                    track_type: TrackType::Split,
+                };
+
+                Ok(SplitTrack {
                     audio_url,
                     video_url,
+                    track_info,
                 })
             }
             None => Err(anyhow::anyhow!(
@@ -180,13 +207,31 @@ impl TryFrom<JsonDump> for SplitTrack {
     }
 }
 
+#[derive(Serialize, Clone, Debug)]
+enum TrackType {
+    #[serde(rename = "merged")]
+    Merged,
+    #[serde(rename = "split")]
+    Split,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct TrackInfo {
+    pub title: String,
+    channel: String,
+    uploader_id: String,
+    acodec: String,
+    vcodec: String,
+    height: Option<u32>,
+    width: Option<u32>,
+    thumbnail: String,
+    track_type: TrackType,
+}
+
 pub enum Track<'a> {
     MergedTrack(MergedTrack),
     SplitTrack(SplitTrack),
-    FileTrack(
-        &'a NamedTempFile,
-        String, /* TODO: this is a bit messy here */
-    ),
+    FileTrack(&'a NamedTempFile),
 }
 
 #[derive(Deserialize)]
@@ -196,12 +241,21 @@ struct JsonDump {
     url: Option<String>,
     channel: String,
     uploader_id: String,
+    acodec: String,
+    vcodec: String,
+    height: Option<u32>,
+    width: Option<u32>,
+    thumbnail: String,
 }
 
 #[derive(Deserialize)]
 struct RequestedFormat {
     url: String,
     fps: Option<f32>,
+    vcodec: String,
+    acodec: String,
+    height: Option<u32>,
+    width: Option<u32>,
 }
 
 //yt-dlp -f "ba+bv[height<=720]" --skip-download --dump-json "https://www.youtube.com/watch?v=GNXNwT65ymg" | jq > out.json

@@ -31,7 +31,7 @@ export default function App() {
     },
   });
   return (
-    <div className="p-4 m-auto max-w-lg pt-4 flex flex-col gap-4">
+    <div className="p-4 m-auto max-w-lg pt-4 flex flex-col gap-4 mb-24">
       <Form mutation={mutation} />
       <Queue isMutationPending={mutation.isPending} />
     </div>

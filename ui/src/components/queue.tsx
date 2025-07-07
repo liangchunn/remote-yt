@@ -1,8 +1,18 @@
-import type { QueueApi, QueueItem } from "@/types/queue";
+import type { QueueApi, QueueItem, TrackInfo } from "@/types/queue";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "./ui/button";
-import { X, LoaderCircle, SkipForward, Pause } from "lucide-react";
+import {
+  X,
+  LoaderCircle,
+  SkipForward,
+  Pause,
+  SkipBack,
+  FastForward,
+  Rewind,
+} from "lucide-react";
 import { useRef } from "react";
+import style from "./animated-border.module.css";
+import clsx from "clsx";
 
 export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
   const { data, error, isSuccess } = useQuery({
@@ -32,7 +42,9 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
   return (
     <div>
       <div className="mb-4">
-        <h1 className="text-lg font-semibold mb-1">Now Playing</h1>
+        <h1 className="text-lg font-semibold mb-1 tracking-tight">
+          Now Playing
+        </h1>
         {nowPlaying && <NowPlaying item={nowPlaying} />}
         {!nowPlaying && !isMutationPending && (
           <p className="text-muted-foreground">Nothing playing</p>
@@ -47,20 +59,18 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
       {(queue.length !== 0 ||
         (queue.length === 0 && !!nowPlaying && isMutationPending)) && (
         <div>
-          <h1 className="text-lg font-semibold mb-1">Up Next</h1>
-          <ul>
+          <h1 className="text-lg font-semibold mb-1 tracking-tight">Up Next</h1>
+          <div className="flex flex-col gap-2">
             {queue.map((item) => (
               <QueueListItem key={item.job_id} item={item} />
             ))}
-            {isMutationPending && (
-              <li>
-                <div className="flex items-center text-muted-foreground">
-                  <LoaderCircle className="mr-1 h-4 w-4 animate-spin" />{" "}
-                  <p>Adding to queue...</p>
-                </div>
-              </li>
-            )}
-          </ul>
+          </div>
+          {isMutationPending && (
+            <div className="flex items-center text-muted-foreground mt-2">
+              <LoaderCircle className="mr-1 h-4 w-4 animate-spin" />{" "}
+              <p>Adding to queue...</p>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -75,24 +85,48 @@ function NowPlaying({ item }: { item: QueueItem }) {
       });
     },
   });
+  const info = item.track_info;
   return (
     // TODO: when pausing, scale to 95%: "transition-transform scale-95"
-    <div className="border py-4 rounded-md">
-      <h3 className="font-medium text-center">{item.title}</h3>
-      <p className="text-muted-foreground text-sm text-center">
-        {item.channel}
-      </p>
-      <div className="flex justify-center items-center mt-1">
-        <Button variant="ghost" size="icon" disabled>
-          <Pause fill="inherit" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => mutation.mutate(item.job_id)}
-        >
-          <SkipForward />
-        </Button>
+    <div
+      className={clsx(style.bbbb, "border rounded-md overflow-hidden relative")}
+    >
+      <img src={info.thumbnail} className=" aspect-video bg-muted" />
+      <div className="p-4">
+        <h3 className="font-medium text-lg text-center">{info.title}</h3>
+        <p className="text-secondary-foreground text-sm text-center">
+          {info.channel}
+        </p>
+        <div className="flex justify-center items-center gap-1 absolute top-1 right-1">
+          <Badge label={`${info.width}×${info.height}`} />
+          <Codec
+            acodec={info.acodec}
+            vcodec={info.vcodec}
+            track_type={info.track_type}
+          />
+        </div>
+        <div className="flex justify-center items-center">
+          <Button variant="ghost" size="icon" className="size-12">
+            <SkipBack className="size-5" />
+          </Button>
+          <Button variant="ghost" size="icon" className="size-12">
+            <Rewind className="size-5" />
+          </Button>
+          <Button variant="ghost" size="icon" className="size-12">
+            <Pause className="size-5" />
+          </Button>
+          <Button variant="ghost" size="icon" className="size-12">
+            <FastForward className="size-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-12"
+            onClick={() => mutation.mutate(item.job_id)}
+          >
+            <SkipForward className="size-5" />
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -106,15 +140,25 @@ function QueueListItem({ item }: { item: QueueItem }) {
       });
     },
   });
+  const info = item.track_info;
   return (
-    <li className="mb-2">
-      <div className="flex items-center">
-        <div className="flex-1">
-          <p>{item.title}</p>
-          <p className="text-muted-foreground text-sm">{item.channel}</p>
+    <div className="flex items-center border rounded-md overflow-hidden gap-2">
+      <img src={info.thumbnail} className="w-36 self-stretch object-cover" />
+      <div className="flex-1 py-2">
+        <p className="leading-4">{info.title}</p>
+        <p className="text-muted-foreground text-sm">{info.channel}</p>
+        <div className="flex  items-center gap-1 top-1 right-1">
+          <Badge label={`${info.width}×${info.height}`} />
+          <Codec
+            acodec={info.acodec}
+            vcodec={info.vcodec}
+            track_type={info.track_type}
+          />
         </div>
+      </div>
+      <div className="self-start">
         <Button
-          variant="secondary"
+          variant="ghost"
           size="icon"
           className="size-8"
           onClick={() => mutation.mutate(item.job_id)}
@@ -122,6 +166,40 @@ function QueueListItem({ item }: { item: QueueItem }) {
           <X />
         </Button>
       </div>
-    </li>
+    </div>
+  );
+}
+
+function trimFormat(codec: string) {
+  if (codec.includes(".")) {
+    return codec.split(".")[0];
+  } else {
+    return codec;
+  }
+}
+
+function Codec({
+  acodec,
+  vcodec,
+  track_type,
+}: Pick<TrackInfo, "acodec" | "vcodec" | "track_type">) {
+  if (track_type === "merged") {
+    return <Badge label={`${trimFormat(vcodec)}+${trimFormat(acodec)}`} />;
+  }
+  if (track_type === "split") {
+    return (
+      <>
+        <Badge label={trimFormat(vcodec)} />
+        <Badge label={trimFormat(acodec)} />
+      </>
+    );
+  }
+}
+
+function Badge({ label }: { label: string }) {
+  return (
+    <div className="text-xs font-mono py-0.5 px-1 border rounded-sm inline-block text-secondary-foreground bg-background/75">
+      {label}
+    </div>
   );
 }

@@ -25,7 +25,7 @@ impl VlcClient {
     // pub fn with_binary_path(binary_path: PathBuf) -> Self {
     //     Self { binary_path }
     // }
-    pub async fn oneshot<'a>(&self, track: Track<'a>) -> anyhow::Result<Child> {
+    pub async fn oneshot<'a>(&self, track: Track<'a>, title: &str) -> anyhow::Result<Child> {
         let binary_path = self.binary_path.clone();
         let mut child = Command::new(binary_path);
         child.arg("--play-and-exit").arg("--fullscreen");
@@ -33,17 +33,15 @@ impl VlcClient {
         match track {
             Track::MergedTrack(merged_track) => child
                 .arg("--meta-title")
-                .arg(merged_track.title)
+                .arg(title)
                 .arg(merged_track.merged_url),
             Track::SplitTrack(split_track) => child
                 .arg("--meta-title")
-                .arg(split_track.title)
+                .arg(title)
                 .arg("--input-slave")
                 .arg(split_track.audio_url)
                 .arg(split_track.video_url),
-            Track::FileTrack(file, title) => {
-                child.arg("--meta-title").arg(title).arg(file.as_ref())
-            }
+            Track::FileTrack(file) => child.arg("--meta-title").arg(title).arg(file.as_ref()),
         };
 
         Ok(child.spawn()?)

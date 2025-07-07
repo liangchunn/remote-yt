@@ -16,6 +16,8 @@ const QUALITY_TO_MIN_HEIGHT = {
   hd: 720,
   fhd: 1080,
   sd_s: 480,
+  hd_s: 720,
+  fhd_s: 1080,
 };
 
 export function Form({
@@ -34,7 +36,11 @@ export function Form({
     const quality = quality_input.value as keyof typeof QUALITY_TO_MIN_HEIGHT;
     const min_height = QUALITY_TO_MIN_HEIGHT[quality];
     input.value = "";
-    mutation.mutate([quality === "sd_s" ? "split" : "merged", url, min_height]);
+    mutation.mutate([
+      quality.endsWith("_s") ? "split" : "merged",
+      url,
+      min_height,
+    ]);
   };
   return (
     <form className="flex gap-2" onSubmit={handleSubmit}>
@@ -52,6 +58,8 @@ export function Form({
           <SelectItem value="hd">HD</SelectItem>
           <SelectItem value="fhd">FHD</SelectItem>
           <SelectItem value="sd_s">SD (Split)</SelectItem>
+          <SelectItem value="hd_s">HD (Split)</SelectItem>
+          <SelectItem value="fhd_s">FHD (Split)</SelectItem>
         </SelectContent>
       </Select>
 

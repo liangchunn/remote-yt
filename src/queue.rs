@@ -145,14 +145,14 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::meta::{InspectMetadata, Metadata};
+use crate::{meta::InspectMetadata, yt_dlp::TrackInfo};
 
 type BoxedCommand = Box<dyn FnOnce() -> BoxFuture<'static, Result<Child, anyhow::Error>> + Send>;
 type CleanupFn = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;
 
 struct Job {
     pub id: Uuid,
-    pub metadata: Metadata,
+    pub metadata: TrackInfo,
     pub task: BoxedCommand,
     pub cleanup: CleanupFn,
 }
@@ -161,7 +161,7 @@ pub struct QueueManager {
     queue: Arc<Mutex<VecDeque<Job>>>,
     notify: Arc<Notify>,
     running: Arc<Mutex<Option<(Uuid, CancellationToken)>>>,
-    current: Arc<Mutex<Option<(Uuid, Metadata)>>>,
+    current: Arc<Mutex<Option<(Uuid, TrackInfo)>>>,
     clear_requested: Arc<AtomicBool>,
 }
 
@@ -262,7 +262,7 @@ impl QueueManager {
         }
     }
 
-    pub async fn submit<F, Fut, C, CFut>(&self, f: F, metadata: Metadata, cleanup: C) -> Uuid
+    pub async fn submit<F, Fut, C, CFut>(&self, f: F, metadata: TrackInfo, cleanup: C) -> Uuid
     where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Result<Child, anyhow::Error>> + Send + 'static,
@@ -370,10 +370,7 @@ impl QueueManager {
             result.push(InspectMetadata {
                 job_id,
                 current: true,
-                title: metadata.title.clone(),
-                url: metadata.url.clone(),
-                channel: metadata.channel.clone(),
-                uploader_id: metadata.uploader_id.clone(),
+                track_info: metadata.clone(),
             })
         }
         let queue = self.queue.lock().await;
@@ -381,10 +378,7 @@ impl QueueManager {
             result.push(InspectMetadata {
                 job_id: job.id,
                 current: false,
-                title: job.metadata.title.clone(),
-                url: job.metadata.url.clone(),
-                channel: job.metadata.channel.clone(),
-                uploader_id: job.metadata.uploader_id.clone(),
+                track_info: job.metadata.clone(),
             });
         }
 

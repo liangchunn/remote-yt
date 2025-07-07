@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use crate::{
     format::MinHeight,
-    meta::{InspectMetadata, Metadata},
+    meta::InspectMetadata,
     queue::QueueManager,
     vlc::VlcClient,
     yt_dlp::{Track, Video},
@@ -79,30 +79,24 @@ async fn queue_merged_handler(
     info!("queued {url}");
 
     let merged_track =
-        Video::get_merged_url(&payload.url, MinHeight(payload.height.unwrap_or(480))).await?;
+        Video::get_merged_track(&payload.url, MinHeight(payload.height.unwrap_or(480))).await?;
 
-    let title = merged_track.title;
-    let channel = merged_track.channel;
-    let uploader_id = merged_track.uploader_id;
+    let track_info = merged_track.track_info;
 
     let uuid = queue
         .submit(
             async move || {
                 // the first run is just to get the title, we're running it again in case the URLs expire
                 let track =
-                    Video::get_merged_url(&payload.url, MinHeight(payload.height.unwrap_or(480)))
+                    Video::get_merged_track(&payload.url, MinHeight(payload.height.unwrap_or(480)))
                         .await?;
-                info!("starting {}", track.title);
+                let title = track.track_info.title.clone();
+                info!("starting {title}");
                 VlcClient::default()
-                    .oneshot(Track::MergedTrack(track))
+                    .oneshot(Track::MergedTrack(track), &title)
                     .await
             },
-            Metadata {
-                url,
-                title,
-                channel,
-                uploader_id,
-            },
+            track_info,
             async move || {},
         )
         .await;
@@ -117,29 +111,25 @@ async fn queue_split_handler(
     let url = payload.url.clone();
     info!("queued {url}");
 
-    let merged_track =
-        Video::get_merged_url(&payload.url, MinHeight(payload.height.unwrap_or(480))).await?;
+    let split_track =
+        Video::get_split_track(&payload.url, MinHeight(payload.height.unwrap_or(480))).await?;
 
-    let title = merged_track.title;
-    let channel = merged_track.channel;
-    let uploader_id = merged_track.uploader_id;
+    let track_info = split_track.track_info;
 
     let uuid = queue
         .submit(
             async move || {
                 // the first run is just to get the title, we're running it again in case the URLs expire
                 let track =
-                    Video::get_split_urls(&payload.url, MinHeight(payload.height.unwrap_or(480)))
+                    Video::get_split_track(&payload.url, MinHeight(payload.height.unwrap_or(480)))
                         .await?;
-                info!("starting {}", track.title);
-                VlcClient::default().oneshot(Track::SplitTrack(track)).await
+                let title = track.track_info.title.clone();
+                info!("starting {title}");
+                VlcClient::default()
+                    .oneshot(Track::SplitTrack(track), &title)
+                    .await
             },
-            Metadata {
-                url,
-                title,
-                channel,
-                uploader_id,
-            },
+            track_info,
             async move || {},
         )
         .await;
@@ -155,33 +145,25 @@ async fn queue_file_handler(
     info!("queued {url}");
 
     let min_height = payload.height.unwrap_or(480);
-    let merged_track = Video::get_merged_url(&payload.url, MinHeight(min_height)).await?;
+    let merged_track = Video::get_merged_track(&payload.url, MinHeight(min_height)).await?;
 
-    let title = merged_track.title;
-    let channel = merged_track.channel;
-    let uploader_id = merged_track.uploader_id;
+    let track_info = merged_track.track_info;
+    let title = track_info.title.clone();
 
     let mut temp_file = NamedTempFile::new().map_err(|e| anyhow::anyhow!(e))?;
     temp_file.disable_cleanup(true);
     let temp_file_clone = temp_file.as_ref().to_owned();
     Video::download_file(&temp_file, &payload.url, MinHeight(min_height)).await?;
-    let title_clone = title.clone();
-    let title_clone_2 = title.clone();
 
     let uuid = queue
         .submit(
             async move || {
-                info!("starting {title_clone}");
+                info!("starting {title}");
                 VlcClient::default()
-                    .oneshot(Track::FileTrack(&temp_file, title_clone))
+                    .oneshot(Track::FileTrack(&temp_file), &title)
                     .await
             },
-            Metadata {
-                url: payload.url,
-                title: title_clone_2,
-                channel,
-                uploader_id,
-            },
+            track_info,
             async move || {
                 match std::fs::remove_file(temp_file_clone.clone()) {
                     Ok(()) => info!("deleted file {}", temp_file_clone.display()),
