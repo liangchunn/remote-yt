@@ -117,6 +117,7 @@ impl TryFrom<JsonDump> for MergedTrack {
                     width: value.width,
                     thumbnail: value.thumbnail,
                     track_type: TrackType::Merged,
+                    format_id: value.format_id,
                 };
 
                 Ok(Self {
@@ -192,6 +193,7 @@ impl TryFrom<JsonDump> for SplitTrack {
                     width,
                     thumbnail: value.thumbnail,
                     track_type: TrackType::Split,
+                    format_id: value.format_id,
                 };
 
                 Ok(SplitTrack {
@@ -226,6 +228,7 @@ pub struct TrackInfo {
     width: Option<u32>,
     thumbnail: String,
     track_type: TrackType,
+    pub format_id: String,
 }
 
 pub enum Track<'a> {
@@ -241,19 +244,23 @@ struct JsonDump {
     url: Option<String>,
     channel: String,
     uploader_id: String,
+    thumbnail: String,
+    // used for merged format
     acodec: String,
     vcodec: String,
     height: Option<u32>,
     width: Option<u32>,
-    thumbnail: String,
+    // used for validation only
+    format_id: String,
 }
 
 #[derive(Deserialize)]
 struct RequestedFormat {
     url: String,
     fps: Option<f32>,
-    vcodec: String,
+    // used for split format
     acodec: String,
+    vcodec: String,
     height: Option<u32>,
     width: Option<u32>,
 }

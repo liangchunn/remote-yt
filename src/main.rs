@@ -9,7 +9,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use log::{error, info};
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use tower_http::{
@@ -81,6 +81,7 @@ async fn queue_merged_handler(
     let merged_track =
         Video::get_merged_track(&payload.url, MinHeight(payload.height.unwrap_or(480))).await?;
 
+    let pre_format_id = merged_track.track_info.format_id.clone();
     let track_info = merged_track.track_info;
 
     let uuid = queue
@@ -90,8 +91,18 @@ async fn queue_merged_handler(
                 let track =
                     Video::get_merged_track(&payload.url, MinHeight(payload.height.unwrap_or(480)))
                         .await?;
+
+                let post_format_id = track.track_info.format_id.clone();
+                if pre_format_id != post_format_id {
+                    warn!(
+                        "track_info desync: queued format {}, but playing {} format",
+                        pre_format_id, post_format_id
+                    );
+                }
+
                 let title = track.track_info.title.clone();
                 info!("starting {title}");
+
                 VlcClient::default()
                     .oneshot(Track::MergedTrack(track), &title)
                     .await
@@ -114,6 +125,7 @@ async fn queue_split_handler(
     let split_track =
         Video::get_split_track(&payload.url, MinHeight(payload.height.unwrap_or(480))).await?;
 
+    let pre_format_id = split_track.track_info.format_id.clone();
     let track_info = split_track.track_info;
 
     let uuid = queue
@@ -123,8 +135,18 @@ async fn queue_split_handler(
                 let track =
                     Video::get_split_track(&payload.url, MinHeight(payload.height.unwrap_or(480)))
                         .await?;
+
+                let post_format_id = track.track_info.format_id.clone();
+                if pre_format_id != post_format_id {
+                    warn!(
+                        "track_info desync: queued format {}, but playing {} format",
+                        pre_format_id, post_format_id
+                    );
+                }
+
                 let title = track.track_info.title.clone();
                 info!("starting {title}");
+
                 VlcClient::default()
                     .oneshot(Track::SplitTrack(track), &title)
                     .await
