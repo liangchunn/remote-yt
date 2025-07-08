@@ -44,13 +44,9 @@ export function Form({
   };
   return (
     <form className="flex gap-2" onSubmit={handleSubmit}>
-      <Input
-        id="url"
-        placeholder="Insert URL..."
-        defaultValue={"https://www.youtube.com/watch?v=GNXNwT65ymg"}
-      />
+      <Input id="url" placeholder="Insert URL..." />
       <Select defaultValue="sd" name="quality">
-        <SelectTrigger className="w-[110px]">
+        <SelectTrigger className="w-[150px]">
           <SelectValue placeholder="Theme" />
         </SelectTrigger>
         <SelectContent className="min-w-0">

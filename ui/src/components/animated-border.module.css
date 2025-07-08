@@ -11,9 +11,9 @@
 }
 
 .bbbb {
-  border: 2px solid transparent;
+  border: 3px solid transparent;
   background:
-    linear-gradient(white, white) padding-box, /* Replace #fff with your actual background */
-    linear-gradient(var(--angle), #ba68c8, var(--border)) border-box;
-  animation: rotate 8s linear infinite;
+    linear-gradient(white, white) padding-box,
+    linear-gradient(var(--angle), rgb(66, 136, 250), rgb(210, 252, 253), rgb(211, 171, 253), rgb(66, 136, 250), rgb(250, 227, 230)) border-box;
+  animation: rotate 16s linear infinite;
 }
