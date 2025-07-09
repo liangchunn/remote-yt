@@ -9,14 +9,13 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use tower_http::{
     compression::CompressionLayer,
     services::{ServeDir, ServeFile},
 };
-use uuid::Uuid;
+use tracing::{Level, error, info, warn};
 
 use crate::{
     format::MinHeight,
@@ -32,12 +31,17 @@ mod queue;
 mod vlc;
 mod yt_dlp;
 
+struct AppState {
+    queue: Arc<QueueManager>,
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
-    // VlcClient::default().launch().await?;
-    let queue = Arc::new(QueueManager::new());
+    let app_state = Arc::new(AppState {
+        queue: Arc::new(QueueManager::new()),
+    });
 
     let serve_app =
         ServeDir::new("ui/dist").not_found_service(ServeFile::new("ui/dist/index.html"));
@@ -51,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/clear", post(clear_handler))
         .route("/api/inspect", get(inspect_handler))
         .layer(CompressionLayer::new())
-        .with_state(queue)
+        .with_state(app_state)
         .fallback_service(serve_app);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
@@ -68,15 +72,15 @@ struct QueuePayload {
 
 #[derive(Serialize)]
 struct QueueResponse {
-    job_id: Uuid,
+    job_id: usize,
 }
 
 async fn queue_merged_handler(
-    State(queue): State<Arc<QueueManager>>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<QueuePayload>,
 ) -> Result<Json<QueueResponse>, AppError> {
     let url = payload.url.clone();
-    info!("queued {url}");
+    info!("queueing {url}...");
 
     let merged_track =
         Video::get_merged_track(&payload.url, MinHeight(payload.height.unwrap_or(480))).await?;
@@ -84,43 +88,50 @@ async fn queue_merged_handler(
     let pre_format_id = merged_track.track_info.format_id.clone();
     let track_info = merged_track.track_info;
 
-    let uuid = queue
+    let job_id = state
+        .queue
         .submit(
             async move || {
-                // the first run is just to get the title, we're running it again in case the URLs expire
-                let track =
-                    Video::get_merged_track(&payload.url, MinHeight(payload.height.unwrap_or(480)))
-                        .await?;
+                {
+                    // the first run is just to get the title, we're running it again in case the URLs expire
+                    let track = Video::get_merged_track(
+                        &payload.url,
+                        MinHeight(payload.height.unwrap_or(480)),
+                    )
+                    .await?;
 
-                let post_format_id = track.track_info.format_id.clone();
-                if pre_format_id != post_format_id {
-                    warn!(
-                        "track_info desync: queued format {}, but playing {} format",
-                        pre_format_id, post_format_id
-                    );
+                    let post_format_id = track.track_info.format_id.clone();
+                    if pre_format_id != post_format_id {
+                        warn!(
+                            "track_info desync: queued format {}, but playing {} format",
+                            pre_format_id, post_format_id
+                        );
+                    }
+
+                    let title = track.track_info.title.clone();
+                    info!("starting {title}");
+
+                    VlcClient::default()
+                        .oneshot(Track::MergedTrack(track), &title)
+                        .await
                 }
-
-                let title = track.track_info.title.clone();
-                info!("starting {title}");
-
-                VlcClient::default()
-                    .oneshot(Track::MergedTrack(track), &title)
-                    .await
             },
             track_info,
             async move || {},
         )
         .await;
 
-    Ok(Json(QueueResponse { job_id: uuid }))
+    info!("queued {url} with job_id {job_id}");
+
+    Ok(Json(QueueResponse { job_id }))
 }
 
 async fn queue_split_handler(
-    State(queue): State<Arc<QueueManager>>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<QueuePayload>,
 ) -> Result<Json<QueueResponse>, AppError> {
     let url = payload.url.clone();
-    info!("queued {url}");
+    info!("queueing {url}...");
 
     let split_track =
         Video::get_split_track(&payload.url, MinHeight(payload.height.unwrap_or(480))).await?;
@@ -128,7 +139,8 @@ async fn queue_split_handler(
     let pre_format_id = split_track.track_info.format_id.clone();
     let track_info = split_track.track_info;
 
-    let uuid = queue
+    let job_id = state
+        .queue
         .submit(
             async move || {
                 // the first run is just to get the title, we're running it again in case the URLs expire
@@ -156,15 +168,17 @@ async fn queue_split_handler(
         )
         .await;
 
-    Ok(Json(QueueResponse { job_id: uuid }))
+    info!("queued {url} with job_id {job_id}");
+
+    Ok(Json(QueueResponse { job_id }))
 }
 
 async fn queue_file_handler(
-    State(queue): State<Arc<QueueManager>>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<QueuePayload>,
 ) -> Result<Json<QueueResponse>, AppError> {
     let url = payload.url.clone();
-    info!("queued {url}");
+    info!("queueing {url}...");
 
     let min_height = payload.height.unwrap_or(480);
     let merged_track = Video::get_merged_track(&payload.url, MinHeight(min_height)).await?;
@@ -177,7 +191,8 @@ async fn queue_file_handler(
     let temp_file_clone = temp_file.as_ref().to_owned();
     Video::download_file(&temp_file, &payload.url, MinHeight(min_height)).await?;
 
-    let uuid = queue
+    let job_id = state
+        .queue
         .submit(
             async move || {
                 info!("starting {title}");
@@ -187,19 +202,23 @@ async fn queue_file_handler(
             },
             track_info,
             async move || {
-                match std::fs::remove_file(temp_file_clone.clone()) {
+                match tokio::fs::remove_file(temp_file_clone.clone()).await {
                     Ok(()) => info!("deleted file {}", temp_file_clone.display()),
-                    Err(e) => error!("failed to delete file {}: {}", temp_file_clone.display(), e),
+                    Err(e) => {
+                        error!("failed to delete file {}: {}", temp_file_clone.display(), e)
+                    }
                 };
             },
         )
         .await;
 
-    Ok(Json(QueueResponse { job_id: uuid }))
+    info!("queued {url} with job_id {job_id}");
+
+    Ok(Json(QueueResponse { job_id }))
 }
 
-async fn cancel_current_handler(State(queue): State<Arc<QueueManager>>) -> &'static str {
-    if queue.cancel().await {
+async fn cancel_current_handler(State(state): State<Arc<AppState>>) -> &'static str {
+    if state.queue.cancel().await {
         "task cancelled"
     } else {
         "nothing to cancel"
@@ -207,23 +226,23 @@ async fn cancel_current_handler(State(queue): State<Arc<QueueManager>>) -> &'sta
 }
 
 async fn cancel_id_handler(
-    State(queue): State<Arc<QueueManager>>,
-    Path(job_id): Path<Uuid>,
+    State(state): State<Arc<AppState>>,
+    Path(job_id): Path<usize>,
 ) -> &'static str {
-    if queue.cancel_by_id(job_id).await {
+    if state.queue.cancel_by_id(job_id).await {
         "task cancelled"
     } else {
         "not found"
     }
 }
 
-async fn clear_handler(State(queue): State<Arc<QueueManager>>) -> &'static str {
-    queue.clear().await;
+async fn clear_handler(State(state): State<Arc<AppState>>) -> &'static str {
+    state.queue.clear().await;
     "queue cleared"
 }
 
-async fn inspect_handler(State(queue): State<Arc<QueueManager>>) -> Json<Vec<InspectMetadata>> {
-    let items = queue.inspect().await;
+async fn inspect_handler(State(state): State<Arc<AppState>>) -> Json<Vec<InspectMetadata>> {
+    let items = state.queue.inspect().await;
 
     Json(items)
 }

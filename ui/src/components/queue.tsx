@@ -107,7 +107,9 @@ function NowPlaying({
       <div className="p-4">
         {info && (
           <>
-            <h3 className="font-medium text-lg text-center">{info.title}</h3>
+            <h3 className="font-medium text-lg text-center leading-6 mb-1">
+              {info.title}
+            </h3>
             <p className="text-secondary-foreground text-sm text-center">
               {info.channel}
             </p>
@@ -133,7 +135,7 @@ function NowPlaying({
             </p>
           </>
         )}
-        <div className="flex justify-center items-center">
+        <div className="flex justify-center items-center mt-1">
           <Button
             variant="ghost"
             size="icon"

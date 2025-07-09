@@ -45,17 +45,15 @@ export function Form({
   return (
     <form className="flex gap-2" onSubmit={handleSubmit}>
       <Input id="url" placeholder="Insert URL..." />
-      <Select defaultValue="sd" name="quality">
-        <SelectTrigger className="w-[150px]">
+      <Select defaultValue="hd_s" name="quality">
+        <SelectTrigger className="w-[130px]">
           <SelectValue placeholder="Theme" />
         </SelectTrigger>
         <SelectContent className="min-w-0">
-          <SelectItem value="sd">SD</SelectItem>
-          <SelectItem value="hd">HD</SelectItem>
-          <SelectItem value="fhd">FHD</SelectItem>
-          <SelectItem value="sd_s">SD (Split)</SelectItem>
-          <SelectItem value="hd_s">HD (Split)</SelectItem>
-          <SelectItem value="fhd_s">FHD (Split)</SelectItem>
+          <SelectItem value="sd_s">480p</SelectItem>
+          <SelectItem value="hd_s">720p</SelectItem>
+          <SelectItem value="fhd_s">1080p</SelectItem>
+          <SelectItem value="sd">480m</SelectItem>
         </SelectContent>
       </Select>
 

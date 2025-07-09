@@ -1,8 +1,8 @@
 use glob::glob;
-use log::{error, info};
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use tokio::process::Command;
+use tracing::{error, info};
 
 use crate::format::{Format, MinHeight};
 
@@ -84,12 +84,13 @@ impl Video {
             }
         }
 
-        let mv_output = Command::new("mv")
-            .arg(path.unwrap()) // TODO: this might be wrong
-            .arg(temp_file.as_ref())
-            .output()
-            .await?;
-        info!("mv status: {}", mv_output.status);
+        match std::fs::rename(path.unwrap(), temp_file.as_ref()) {
+            Ok(_) => {}
+            Err(e) => {
+                error!("failed to rename file: {e}");
+                return Err(anyhow::anyhow!("failed to rename file: {e}"));
+            }
+        };
 
         Ok(())
     }
