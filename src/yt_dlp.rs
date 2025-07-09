@@ -119,6 +119,7 @@ impl TryFrom<JsonDump> for MergedTrack {
                     thumbnail: value.thumbnail,
                     track_type: TrackType::Merged,
                     format_id: value.format_id,
+                    duration: value.duration,
                 };
 
                 Ok(Self {
@@ -195,6 +196,7 @@ impl TryFrom<JsonDump> for SplitTrack {
                     thumbnail: value.thumbnail,
                     track_type: TrackType::Split,
                     format_id: value.format_id,
+                    duration: value.duration,
                 };
 
                 Ok(SplitTrack {
@@ -230,6 +232,7 @@ pub struct TrackInfo {
     thumbnail: String,
     track_type: TrackType,
     pub format_id: String,
+    duration: u32,
 }
 
 pub enum Track<'a> {
@@ -246,6 +249,7 @@ struct JsonDump {
     channel: String,
     uploader_id: String,
     thumbnail: String,
+    duration: u32,
     // used for merged format
     acodec: String,
     vcodec: String,
