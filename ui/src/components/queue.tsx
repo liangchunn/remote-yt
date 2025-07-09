@@ -10,7 +10,7 @@ import {
   FastForward,
   Rewind,
 } from "lucide-react";
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 import style from "./animated-border.module.css";
 import clsx from "clsx";
 
@@ -36,7 +36,11 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
   const queue = items.length > 1 ? items.slice(1) : [];
 
   if (errorRef.current) {
-    return <p className="text-destructive">Server offline</p>;
+    return (
+      <p className="text-destructive text-center text-lg mt-4">
+        Server offline
+      </p>
+    );
   }
 
   return (
@@ -45,16 +49,7 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
         <h1 className="text-lg font-semibold mb-1 tracking-tight">
           Now Playing
         </h1>
-        {nowPlaying && <NowPlaying item={nowPlaying} />}
-        {!nowPlaying && !isMutationPending && (
-          <p className="text-muted-foreground">Nothing playing</p>
-        )}
-        {!nowPlaying && isMutationPending && (
-          <div className="flex items-center text-muted-foreground">
-            <LoaderCircle className="mr-1 h-4 w-4 animate-spin" />{" "}
-            <p>Adding to queue...</p>
-          </div>
-        )}
+        <NowPlaying item={nowPlaying} isMutationPending={isMutationPending} />
       </div>
       {(queue.length !== 0 ||
         (queue.length === 0 && !!nowPlaying && isMutationPending)) && (
@@ -64,20 +59,21 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
             {queue.map((item) => (
               <QueueListItem key={item.job_id} item={item} />
             ))}
+            {isMutationPending && <QueueListItem item={null} />}
           </div>
-          {isMutationPending && (
-            <div className="flex items-center text-muted-foreground mt-2">
-              <LoaderCircle className="mr-1 h-4 w-4 animate-spin" />{" "}
-              <p>Adding to queue...</p>
-            </div>
-          )}
         </div>
       )}
     </div>
   );
 }
 
-function NowPlaying({ item }: { item: QueueItem }) {
+function NowPlaying({
+  item,
+  isMutationPending,
+}: {
+  item: QueueItem | null;
+  isMutationPending: boolean;
+}) {
   const mutation = useMutation({
     mutationFn: (job_id: string) => {
       return fetch(`/api/cancel/${job_id}`, {
@@ -85,44 +81,97 @@ function NowPlaying({ item }: { item: QueueItem }) {
       });
     },
   });
-  const info = item.track_info;
+  const info = item?.track_info;
+  const handleSkip = () => {
+    if (item !== null) {
+      mutation.mutate(item.job_id);
+    }
+  };
   return (
     // TODO: when pausing, scale to 95%: "transition-transform scale-95"
     <div
-      className={clsx(style.bbbb, "border rounded-md overflow-hidden relative")}
+      className={clsx(
+        info && [style.bbbb, "border-transparent"],
+        !info && "border-muted-background",
+        "border-[3px] border-solid rounded-md overflow-hidden relative"
+      )}
     >
-      <img src={info.thumbnail} className=" aspect-video bg-muted" />
-      <div className="p-4">
-        <h3 className="font-medium text-lg text-center">{info.title}</h3>
-        <p className="text-secondary-foreground text-sm text-center">
-          {info.channel}
-        </p>
-        <div className="flex justify-center items-center gap-1 absolute top-1 right-1">
-          <Badge label={`${info.width}×${info.height}`} />
-          <Codec
-            acodec={info.acodec}
-            vcodec={info.vcodec}
-            track_type={info.track_type}
-          />
+      {!info && (
+        <div className="aspect-video bg-muted/95 flex items-center justify-center">
+          {!item && isMutationPending && (
+            <LoaderCircle className="h-8 w-8 animate-spin text-muted-foreground" />
+          )}
         </div>
+      )}
+      {info && <img src={info.thumbnail} className="aspect-video bg-muted" />}
+      <div className="p-4">
+        {info && (
+          <>
+            <h3 className="font-medium text-lg text-center">{info.title}</h3>
+            <p className="text-secondary-foreground text-sm text-center">
+              {info.channel}
+            </p>
+          </>
+        )}
+        {info && (
+          <div className="flex justify-center items-center gap-1 absolute top-1 right-1">
+            <Badge label={`${info.width}×${info.height}`} />
+            <Codec
+              acodec={info.acodec}
+              vcodec={info.vcodec}
+              track_type={info.track_type}
+            />
+          </div>
+        )}
+        {!item && (
+          <>
+            <h3 className="font-medium text-lg text-center text-muted-foreground">
+              Nothing playing
+            </h3>
+            <p className=" text-sm text-center text-muted-foreground">
+              Add something to the queue
+            </p>
+          </>
+        )}
         <div className="flex justify-center items-center">
-          <Button variant="ghost" size="icon" className="size-12">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-12"
+            disabled={!item}
+          >
             <SkipBack className="size-5" />
           </Button>
-          <Button variant="ghost" size="icon" className="size-12">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-12"
+            disabled={!item}
+          >
             <Rewind className="size-5" />
           </Button>
-          <Button variant="ghost" size="icon" className="size-12">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-12"
+            disabled={!item}
+          >
             <Pause className="size-5" />
           </Button>
-          <Button variant="ghost" size="icon" className="size-12">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-12"
+            disabled={!item}
+          >
             <FastForward className="size-5" />
           </Button>
           <Button
             variant="ghost"
             size="icon"
             className="size-12"
-            onClick={() => mutation.mutate(item.job_id)}
+            onClick={handleSkip}
+            disabled={!item}
           >
             <SkipForward className="size-5" />
           </Button>
@@ -132,7 +181,7 @@ function NowPlaying({ item }: { item: QueueItem }) {
   );
 }
 
-function QueueListItem({ item }: { item: QueueItem }) {
+function QueueListItem({ item }: { item: QueueItem | null }) {
   const mutation = useMutation({
     mutationFn: (job_id: string) => {
       return fetch(`/api/cancel/${job_id}`, {
@@ -140,30 +189,57 @@ function QueueListItem({ item }: { item: QueueItem }) {
       });
     },
   });
-  const info = item.track_info;
+  const info = item?.track_info;
+  const handleUnqueue = useCallback(() => {
+    if (info) {
+      mutation.mutate(item.job_id);
+    }
+  }, [info, item, mutation]);
+  const isRemoving = mutation.isPending;
   return (
     <div className="flex items-center border rounded-md overflow-hidden gap-2">
-      <img src={info.thumbnail} className="w-36 self-stretch object-cover" />
-      <div className="flex-1 py-2">
-        <p className="leading-4">{info.title}</p>
-        <p className="text-muted-foreground text-sm">{info.channel}</p>
-        <div className="flex  items-center gap-1 top-1 right-1">
-          <Badge label={`${info.width}×${info.height}`} />
-          <Codec
-            acodec={info.acodec}
-            vcodec={info.vcodec}
-            track_type={info.track_type}
-          />
+      {info ? (
+        <img
+          src={info.thumbnail}
+          className="w-36 self-stretch object-cover bg-muted"
+        />
+      ) : (
+        <div className="w-36 self-stretch object-cover bg-muted/95 ">
+          <div className="aspect-video flex items-center justify-center">
+            <LoaderCircle className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
         </div>
+      )}
+      <div className="flex-1 py-3 pl-1">
+        {info ? (
+          <>
+            <p className="leading-4 mb-0.5">{info.title}</p>
+            <p className="text-muted-foreground text-sm mb-1">{info.channel}</p>
+            <div className="flex items-center gap-1 top-1 right-1">
+              <Badge label={`${info.width}×${info.height}`} />
+              <Codec
+                acodec={info.acodec}
+                vcodec={info.vcodec}
+                track_type={info.track_type}
+              />
+            </div>
+          </>
+        ) : (
+          <p className="text-muted-foreground">Adding to queue...</p>
+        )}
       </div>
       <div className="self-start">
         <Button
           variant="ghost"
           size="icon"
           className="size-8"
-          onClick={() => mutation.mutate(item.job_id)}
+          onClick={handleUnqueue}
+          disabled={!item || isRemoving}
         >
-          <X />
+          {isRemoving && (
+            <LoaderCircle className="animate-spin text-muted-foreground" />
+          )}
+          {!isRemoving && <X />}
         </Button>
       </div>
     </div>
