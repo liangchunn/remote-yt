@@ -300,7 +300,7 @@ function PlayerProgress({ playerState }: { playerState: PlayerState | null }) {
         </p>
       </div>
       <div
-        className="absolute bottom-1.5 left-0 w-full h-6 px-4 cursor-pointer"
+        className="absolute bottom-1.5 left-0 w-full h-6 px-4 cursor-pointer touch-none"
         ref={barRef}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
