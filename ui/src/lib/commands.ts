@@ -4,7 +4,9 @@ type Command =
   | "SeekForward"
   | "SeekRewind"
   | { SeekTo: number }
-  | "TogglePause";
+  | "TogglePause"
+  | "Mute"
+  | "FullVolume";
 
 export function usePlayerCommandsMutation() {
   const queryClient = useQueryClient();
@@ -31,11 +33,15 @@ export function usePlayerCommandsMutation() {
     commandMutation.mutate({
       SeekTo: time,
     });
+  const mute = () => commandMutation.mutate("Mute");
+  const fullVolume = () => commandMutation.mutate("FullVolume");
 
   return {
     seekForward,
     seekRewind,
     togglePause,
     seekTo,
+    mute,
+    fullVolume,
   };
 }

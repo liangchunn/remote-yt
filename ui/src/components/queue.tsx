@@ -15,6 +15,8 @@ import {
   FastForward,
   Rewind,
   Play,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import style from "./animated-border.module.css";
@@ -107,6 +109,11 @@ function NowPlaying({
       )}
       <div className="relative">
         {info && <img src={info.thumbnail} className="aspect-video bg-muted" />}
+        {playerState === null && (
+          <div className="absolute w-full h-full top-0 left-0 select-none flex items-center justify-center">
+            <LoaderCircle className="h-8 w-8 animate-spin text-white/50" />
+          </div>
+        )}
         <PlayerProgress playerState={playerState} />
       </div>
       <div className="p-4">
@@ -180,7 +187,7 @@ function PlayerControls({
       <Button
         variant="ghost"
         size="icon"
-        className="size-12"
+        className="size-12 cursor-pointer"
         disabled={!jobId || !playerState}
         onClick={seekRewind}
       >
@@ -189,7 +196,7 @@ function PlayerControls({
       <Button
         variant="ghost"
         size="icon"
-        className="size-12"
+        className="size-12 cursor-pointer"
         disabled={!jobId || !playerState}
         onClick={togglePause}
       >
@@ -202,7 +209,7 @@ function PlayerControls({
       <Button
         variant="ghost"
         size="icon"
-        className="size-12"
+        className="size-12 cursor-pointer"
         disabled={!jobId || !playerState}
         onClick={seekForward}
       >
@@ -211,7 +218,7 @@ function PlayerControls({
       <Button
         variant="ghost"
         size="icon"
-        className="size-12"
+        className="size-12 cursor-pointer"
         onClick={handleSkip}
         disabled={!jobId}
       >
@@ -238,7 +245,7 @@ function PlayerProgress({ playerState }: { playerState: PlayerState | null }) {
   const [dragTime, setDragTime] = useState<number | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
 
-  const { seekTo } = usePlayerCommandsMutation();
+  const { seekTo, mute, fullVolume } = usePlayerCommandsMutation();
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!playerState || !barRef.current) return;
@@ -284,6 +291,14 @@ function PlayerProgress({ playerState }: { playerState: PlayerState | null }) {
     isDragging && dragTime !== null ? dragTime : playerState?.time || 0
   );
   const totalString = playerState ? formatTime(playerState.length) : "";
+  const isMuted = playerState ? playerState.volume === 0 : false;
+  const handleVolume = () => {
+    if (isMuted) {
+      fullVolume();
+    } else {
+      mute();
+    }
+  };
 
   return (
     <div
@@ -292,12 +307,23 @@ function PlayerProgress({ playerState }: { playerState: PlayerState | null }) {
       } ${visible ? "block" : "hidden"}`}
     >
       <div className="absolute bottom-0 left-0 w-full h-24 bg-gradient-to-t from-black/70 to-black/0" />
-      <div className="absolute bottom-6.5 right-0 pr-4">
+      <div className="absolute bottom-6.5 left-0 pl-4">
         <p className="tracking-tight text-sm text-white/50 font-mono">
           <span>{currString}</span>
           <span className="mx-0.5">/</span>
           <span>{totalString}</span>
         </p>
+      </div>
+      <div className="absolute bottom-6.5 right-0 pr-4">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="cursor-pointer hover:bg-muted/15"
+          onClick={handleVolume}
+        >
+          {!isMuted && <Volume2 className="stroke-white/80" />}
+          {isMuted && <VolumeX className="stroke-white/80" />}
+        </Button>
       </div>
       <div
         className="absolute bottom-1.5 left-0 w-full h-6 px-4 cursor-pointer touch-none"

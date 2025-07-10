@@ -31,6 +31,8 @@ pub enum RpcCommand {
     SeekRewind,
     SeekTo(u32),
     TogglePause,
+    Mute,
+    FullVolume,
 }
 
 impl RpcCommand {
@@ -52,12 +54,21 @@ impl RpcCommand {
             RpcCommand::TogglePause => {
                 map.insert("command", "pl_pause".into());
             }
+            RpcCommand::Mute => {
+                map.insert("command", "volume".into());
+                map.insert("val", "0".to_string());
+            }
+            RpcCommand::FullVolume => {
+                map.insert("command", "volume".into());
+                map.insert("val", "255".to_string());
+            }
         };
 
         return serde_urlencoded::to_string(map).unwrap();
     }
 }
 
+// https://github.com/videolan/vlc/tree/master/share/lua/http/requests
 impl Rpc {
     pub fn new(host: String, port: u16, password: String) -> Self {
         let url = format!("http://{host}:{port}/requests/status.json");
