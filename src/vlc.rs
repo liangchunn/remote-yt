@@ -28,7 +28,13 @@ impl VlcClient {
     pub async fn oneshot<'a>(&self, track: Track<'a>, title: &str) -> anyhow::Result<Child> {
         let binary_path = self.binary_path.clone();
         let mut child = Command::new(binary_path);
-        child.arg("--play-and-exit").arg("--fullscreen");
+        child
+            .arg("--play-and-exit")
+            .arg("--fullscreen")
+            .arg("--extraintf=http")
+            .arg("--http-password=abc")
+            .arg("--http-host=0.0.0.0")
+            .arg("--http-port=8081");
 
         match track {
             Track::MergedTrack(merged_track) => child

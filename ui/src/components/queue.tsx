@@ -1,4 +1,9 @@
-import type { QueueApi, QueueItem, TrackInfo } from "@/types/queue";
+import type {
+  InspectApi,
+  PlayerState,
+  QueueItem,
+  TrackInfo,
+} from "@/types/inspect";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "./ui/button";
 import {
@@ -9,10 +14,12 @@ import {
   SkipBack,
   FastForward,
   Rewind,
+  Play,
 } from "lucide-react";
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import style from "./animated-border.module.css";
 import clsx from "clsx";
+import { usePlayerCommandsMutation } from "@/lib/commands";
 
 export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
   const { data, error, isSuccess } = useQuery({
@@ -22,7 +29,7 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
       if (!response.ok) {
         throw new Error("failed to fetch");
       }
-      return (await response.json()) as QueueApi;
+      return (await response.json()) as InspectApi;
     },
     refetchInterval: 1000,
   });
@@ -31,9 +38,10 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
   const errorRef = useRef(error);
   if (error || isSuccess) errorRef.current = error;
 
-  const items = data ?? [];
+  const items = data?.queue ?? [];
   const nowPlaying = items[0] ?? null;
   const queue = items.length > 1 ? items.slice(1) : [];
+  const playerState = data?.player ?? null;
 
   if (errorRef.current) {
     return (
@@ -49,7 +57,11 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
         <h1 className="text-lg font-semibold mb-1 tracking-tight">
           Now Playing
         </h1>
-        <NowPlaying item={nowPlaying} isMutationPending={isMutationPending} />
+        <NowPlaying
+          item={nowPlaying}
+          isMutationPending={isMutationPending}
+          playerState={playerState}
+        />
       </div>
       {(queue.length !== 0 ||
         (queue.length === 0 && !!nowPlaying && isMutationPending)) && (
@@ -70,9 +82,11 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
 function NowPlaying({
   item,
   isMutationPending,
+  playerState,
 }: {
   item: QueueItem | null;
   isMutationPending: boolean;
+  playerState: PlayerState | null;
 }) {
   const mutation = useMutation({
     mutationFn: (job_id: string) => {
@@ -87,6 +101,7 @@ function NowPlaying({
       mutation.mutate(item.job_id);
     }
   };
+  const { seekForward, seekRewind, togglePause } = usePlayerCommandsMutation();
   return (
     // TODO: when pausing, scale to 95%: "transition-transform scale-95"
     <div
@@ -103,7 +118,10 @@ function NowPlaying({
           )}
         </div>
       )}
-      {info && <img src={info.thumbnail} className="aspect-video bg-muted" />}
+      <div className="relative">
+        {info && <img src={info.thumbnail} className="aspect-video bg-muted" />}
+        <PlayerProgress playerState={playerState} />
+      </div>
       <div className="p-4">
         {info && (
           <>
@@ -136,37 +154,39 @@ function NowPlaying({
           </>
         )}
         <div className="flex justify-center items-center mt-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-12"
-            disabled={!item}
-          >
-            <SkipBack className="size-5" />
+          <Button variant="ghost" size="icon" className="size-12" disabled>
+            <SkipBack className="size-5 fill-inherit" />
           </Button>
           <Button
             variant="ghost"
             size="icon"
             className="size-12"
-            disabled={!item}
+            disabled={!item || !playerState}
+            onClick={seekRewind}
           >
-            <Rewind className="size-5" />
+            <Rewind className="size-5 fill-inherit" />
           </Button>
           <Button
             variant="ghost"
             size="icon"
             className="size-12"
-            disabled={!item}
+            disabled={!item || !playerState}
+            onClick={togglePause}
           >
-            <Pause className="size-5" />
+            {item && playerState && playerState.state === "paused" ? (
+              <Play className="size-5 fill-inherit" />
+            ) : (
+              <Pause className="size-5 fill-inherit" />
+            )}
           </Button>
           <Button
             variant="ghost"
             size="icon"
             className="size-12"
-            disabled={!item}
+            disabled={!item || !playerState}
+            onClick={seekForward}
           >
-            <FastForward className="size-5" />
+            <FastForward className="size-5 fill-inherit" />
           </Button>
           <Button
             variant="ghost"
@@ -175,12 +195,65 @@ function NowPlaying({
             onClick={handleSkip}
             disabled={!item}
           >
-            <SkipForward className="size-5" />
+            <SkipForward className="size-5 fill-inherit" />
           </Button>
         </div>
       </div>
     </div>
   );
+}
+
+function PlayerProgress({ playerState }: { playerState: PlayerState | null }) {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (playerState) {
+      setVisible(true);
+    } else {
+      // Small delay to allow fade-out before hiding
+      const timeout = setTimeout(() => setVisible(false), 300);
+      return () => clearTimeout(timeout);
+    }
+  }, [playerState]);
+
+  const currString = playerState ? formatTime(playerState.time) : "";
+  const totalString = playerState ? formatTime(playerState.length) : "";
+
+  return (
+    <div
+      className={`transition-opacity duration-300 ease-in-out ${
+        playerState ? "opacity-100" : "opacity-0"
+      } ${visible ? "block" : "hidden"}`}
+    >
+      <div className="absolute bottom-0 left-0 w-full h-24 bg-gradient-to-t from-black/70 to-black/0" />
+      <div className="absolute bottom-6.5 right-0 pr-4">
+        <p className="tracking-tight text-sm text-white/50 font-mono">
+          <span>{currString}</span>
+          <span className="mx-0.5">/</span>
+          <span>{totalString}</span>
+        </p>
+      </div>
+      <div className="absolute bottom-1.5 left-0 w-full h-1 p-4">
+        <div className="relative">
+          <div className="bg-white/50 h-1 absolute left-0 bottom-0 w-full rounded-full"></div>
+          <div
+            className="bg-red-500 h-1 absolute left-0 bottom-0 rounded-full"
+            style={{
+              width: `${
+                playerState ? (playerState.time / playerState.length) * 100 : 0
+              }%`,
+            }}
+          ></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatTime(seconds: number) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
 function QueueListItem({ item }: { item: QueueItem | null }) {

@@ -1,4 +1,14 @@
-export type QueueApi = QueueItem[];
+export type InspectApi = {
+  queue: QueueItem[];
+  player: PlayerState | null;
+};
+
+export type PlayerState = {
+  state: "playing" | "paused";
+  time: number;
+  length: number;
+  volume: number;
+};
 
 export type QueueItem = {
   job_id: string;

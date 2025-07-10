@@ -21,6 +21,7 @@ use crate::{
     format::MinHeight,
     meta::InspectMetadata,
     queue::QueueManager,
+    rpc::{Rpc, RpcCommand, RpcResponse},
     vlc::VlcClient,
     yt_dlp::{Track, Video},
 };
@@ -28,11 +29,13 @@ use crate::{
 mod format;
 mod meta;
 mod queue;
+mod rpc;
 mod vlc;
 mod yt_dlp;
 
 struct AppState {
     queue: Arc<QueueManager>,
+    rpc: Arc<Rpc>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -41,6 +44,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app_state = Arc::new(AppState {
         queue: Arc::new(QueueManager::new()),
+        rpc: Arc::new(Rpc::new("0.0.0.0".into(), 8081, "abc".into())),
     });
 
     let serve_app =
@@ -54,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/cancel/{id}", post(cancel_id_handler))
         .route("/api/clear", post(clear_handler))
         .route("/api/inspect", get(inspect_handler))
+        .route("/api/execute_command", post(player_commands))
         .layer(CompressionLayer::new())
         .with_state(app_state)
         .fallback_service(serve_app);
@@ -241,10 +246,33 @@ async fn clear_handler(State(state): State<Arc<AppState>>) -> &'static str {
     "queue cleared"
 }
 
-async fn inspect_handler(State(state): State<Arc<AppState>>) -> Json<Vec<InspectMetadata>> {
-    let items = state.queue.inspect().await;
+#[derive(Serialize)]
+struct InspectResponse {
+    queue: Vec<InspectMetadata>,
+    player: Option<RpcResponse>,
+}
 
-    Json(items)
+async fn inspect_handler(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<InspectResponse>, AppError> {
+    let (queue, player) = tokio::join!(state.queue.inspect(), state.rpc.get_status());
+    let player = match player {
+        Ok(v) => Some(v),
+        Err(e) => {
+            error!("{e:#?}");
+            None
+        }
+    };
+
+    Ok(Json(InspectResponse { queue, player }))
+}
+
+async fn player_commands(
+    State(state): State<Arc<AppState>>,
+    Json(command): Json<RpcCommand>,
+) -> Result<Json<bool>, AppError> {
+    state.rpc.execute_command(command).await?;
+    Ok(Json(true))
 }
 
 // Wrapper type for anyhow::Error

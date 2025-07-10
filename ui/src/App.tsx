@@ -1,7 +1,7 @@
 import { Queue } from "./components/queue";
 import { Form } from "./components/form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { VideoType } from "./types/queue";
+import type { VideoType } from "./types/inspect";
 
 export default function App() {
   const queryClient = useQueryClient();

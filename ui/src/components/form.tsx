@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import type { VideoType } from "@/types/queue";
+import type { VideoType } from "@/types/inspect";
 
 const QUALITY_TO_MIN_HEIGHT = {
   sd: 480,
