@@ -16,7 +16,7 @@ import {
   Rewind,
   Play,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import style from "./animated-border.module.css";
 import clsx from "clsx";
 import { usePlayerCommandsMutation } from "@/lib/commands";
@@ -88,20 +88,7 @@ function NowPlaying({
   isMutationPending: boolean;
   playerState: PlayerState | null;
 }) {
-  const mutation = useMutation({
-    mutationFn: (job_id: string) => {
-      return fetch(`/api/cancel/${job_id}`, {
-        method: "POST",
-      });
-    },
-  });
   const info = item?.track_info;
-  const handleSkip = () => {
-    if (item !== null) {
-      mutation.mutate(item.job_id);
-    }
-  };
-  const { seekForward, seekRewind, togglePause } = usePlayerCommandsMutation();
   return (
     // TODO: when pausing, scale to 95%: "transition-transform scale-95"
     <div
@@ -153,52 +140,83 @@ function NowPlaying({
             </p>
           </>
         )}
-        <div className="flex justify-center items-center mt-1">
-          <Button variant="ghost" size="icon" className="size-12" disabled>
-            <SkipBack className="size-5 fill-inherit" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-12"
-            disabled={!item || !playerState}
-            onClick={seekRewind}
-          >
-            <Rewind className="size-5 fill-inherit" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-12"
-            disabled={!item || !playerState}
-            onClick={togglePause}
-          >
-            {item && playerState && playerState.state === "paused" ? (
-              <Play className="size-5 fill-inherit" />
-            ) : (
-              <Pause className="size-5 fill-inherit" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-12"
-            disabled={!item || !playerState}
-            onClick={seekForward}
-          >
-            <FastForward className="size-5 fill-inherit" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-12"
-            onClick={handleSkip}
-            disabled={!item}
-          >
-            <SkipForward className="size-5 fill-inherit" />
-          </Button>
-        </div>
+        <PlayerControlsMemoized
+          jobId={item?.job_id ?? null}
+          playerState={playerState?.state ?? null}
+        />
       </div>
+    </div>
+  );
+}
+
+const PlayerControlsMemoized = memo(PlayerControls);
+
+function PlayerControls({
+  jobId,
+  playerState,
+}: {
+  jobId: string | null;
+  playerState: "playing" | "paused" | null;
+}) {
+  const mutation = useMutation({
+    mutationFn: (job_id: string) => {
+      return fetch(`/api/cancel/${job_id}`, {
+        method: "POST",
+      });
+    },
+  });
+  const handleSkip = () => {
+    if (jobId) {
+      mutation.mutate(jobId);
+    }
+  };
+  const { seekForward, seekRewind, togglePause } = usePlayerCommandsMutation();
+
+  return (
+    <div className="flex justify-center items-center mt-1">
+      <Button variant="ghost" size="icon" className="size-12" disabled>
+        <SkipBack className="size-5 fill-inherit" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-12"
+        disabled={!jobId || !playerState}
+        onClick={seekRewind}
+      >
+        <Rewind className="size-5 fill-inherit" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-12"
+        disabled={!jobId || !playerState}
+        onClick={togglePause}
+      >
+        {jobId && playerState === "paused" ? (
+          <Play className="size-5 fill-inherit" />
+        ) : (
+          <Pause className="size-5 fill-inherit" />
+        )}
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-12"
+        disabled={!jobId || !playerState}
+        onClick={seekForward}
+      >
+        <FastForward className="size-5 fill-inherit" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-12"
+        onClick={handleSkip}
+        disabled={!jobId}
+      >
+        <SkipForward className="size-5 fill-inherit" />
+      </Button>
     </div>
   );
 }
@@ -216,7 +234,55 @@ function PlayerProgress({ playerState }: { playerState: PlayerState | null }) {
     }
   }, [playerState]);
 
-  const currString = playerState ? formatTime(playerState.time) : "";
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragTime, setDragTime] = useState<number | null>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+
+  const { seekTo } = usePlayerCommandsMutation();
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (!playerState || !barRef.current) return;
+    setIsDragging(true);
+    barRef.current.setPointerCapture(e.pointerId);
+    updateTimeFromPointer(e);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!isDragging || !playerState || !barRef.current) return;
+    updateTimeFromPointer(e);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (!playerState || !barRef.current) return;
+    if (isDragging && dragTime !== null) {
+      seekTo(dragTime);
+    }
+    setIsDragging(false);
+    setDragTime(null);
+    barRef.current.releasePointerCapture(e.pointerId);
+  };
+
+  const updateTimeFromPointer = (e: React.PointerEvent) => {
+    if (!barRef.current || !playerState) return;
+    const rect = barRef.current.getBoundingClientRect();
+    const paddingX = 16; // px-4 = 1rem = 16px
+    const usableWidth = rect.width - paddingX * 2;
+    const offsetX = Math.min(
+      Math.max(e.clientX - rect.left - paddingX, 0),
+      usableWidth
+    );
+    const percent = offsetX / usableWidth;
+    const newTime = Math.round(percent * playerState.length);
+    setDragTime(newTime);
+  };
+
+  const currentTime =
+    isDragging && dragTime !== null ? dragTime : playerState?.time || 0;
+  const progressPercent = (currentTime / (playerState?.length || 1)) * 100;
+
+  const currString = formatTime(
+    isDragging && dragTime !== null ? dragTime : playerState?.time || 0
+  );
   const totalString = playerState ? formatTime(playerState.length) : "";
 
   return (
@@ -233,17 +299,27 @@ function PlayerProgress({ playerState }: { playerState: PlayerState | null }) {
           <span>{totalString}</span>
         </p>
       </div>
-      <div className="absolute bottom-1.5 left-0 w-full h-1 p-4">
-        <div className="relative">
-          <div className="bg-white/50 h-1 absolute left-0 bottom-0 w-full rounded-full"></div>
+      <div
+        className="absolute bottom-1.5 left-0 w-full h-6 px-4 cursor-pointer"
+        ref={barRef}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+      >
+        <div className="relative h-full">
+          <div className="bg-white/50 h-1 absolute left-0 top-1/2 -translate-y-1/2 w-full rounded-full"></div>
           <div
-            className="bg-red-500 h-1 absolute left-0 bottom-0 rounded-full"
-            style={{
-              width: `${
-                playerState ? (playerState.time / playerState.length) * 100 : 0
-              }%`,
-            }}
+            className="bg-red-500 h-1 absolute left-0 top-1/2 -translate-y-1/2 rounded-full"
+            style={{ width: `${progressPercent}%` }}
           ></div>
+          <div
+            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-red-500 rounded-full shadow"
+            style={{
+              left: `calc(${progressPercent}% - 6px)`, // 6px = half of 12px width
+              transition: isDragging ? "none" : "left 0.1s linear",
+              zIndex: 10,
+            }}
+          />
         </div>
       </div>
     </div>

@@ -26,11 +26,16 @@ export function usePlayerCommandsMutation() {
 
   const seekForward = () => commandMutation.mutate("SeekForward");
   const seekRewind = () => commandMutation.mutate("SeekRewind");
-  const togglePause = async () => commandMutation.mutate("TogglePause");
+  const togglePause = () => commandMutation.mutate("TogglePause");
+  const seekTo = (time: number) =>
+    commandMutation.mutate({
+      SeekTo: time,
+    });
 
   return {
     seekForward,
     seekRewind,
     togglePause,
+    seekTo,
   };
 }

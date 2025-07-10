@@ -259,7 +259,7 @@ async fn inspect_handler(
     let player = match player {
         Ok(v) => Some(v),
         Err(e) => {
-            error!("{e:#?}");
+            error!("rpc error: {e}");
             None
         }
     };
