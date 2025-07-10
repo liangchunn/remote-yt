@@ -353,9 +353,17 @@ function PlayerProgress({ playerState }: { playerState: PlayerState | null }) {
 }
 
 function formatTime(seconds: number) {
-  const mins = Math.floor(seconds / 60);
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
   const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, "0")}`;
+
+  if (hrs > 0) {
+    return `${hrs}:${mins.toString().padStart(2, "0")}:${secs
+      .toString()
+      .padStart(2, "0")}`;
+  } else {
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  }
 }
 
 function QueueListItem({ item }: { item: QueueItem | null }) {
