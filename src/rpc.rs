@@ -64,7 +64,7 @@ impl RpcCommand {
             }
         };
 
-        return serde_urlencoded::to_string(map).unwrap();
+        serde_urlencoded::to_string(map).unwrap()
     }
 }
 

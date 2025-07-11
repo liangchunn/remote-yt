@@ -1,109 +1,20 @@
 use std::{
     collections::VecDeque,
-    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 
-use tokio::{
-    process::Child,
-    sync::{Mutex, Notify},
-};
+use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::{
-    format::MinHeight,
+    job::{Job, JobType},
     meta::InspectMetadata,
-    vlc::VlcClient,
-    yt_dlp::{Track, TrackInfo, Video},
+    yt_dlp::TrackInfo,
 };
-
-#[derive(Clone, Debug)]
-pub enum Args {
-    QueueMerged {
-        url: String,
-        height: Option<u32>,
-        format_id: String,
-    },
-    QueueSplit {
-        url: String,
-        height: Option<u32>,
-        format_id: String,
-    },
-    QueueFile {
-        title: String,
-        file: PathBuf,
-    },
-}
-
-#[derive(Clone, Debug)]
-struct Job {
-    pub id: usize,
-    pub metadata: TrackInfo,
-    pub args: Args,
-}
-
-impl Job {
-    async fn execute(self) -> anyhow::Result<Child> {
-        match self.args {
-            Args::QueueMerged {
-                url,
-                height,
-                format_id,
-            } => {
-                // the first run is just to get the title, we're running it again in case the URLs expire
-                let track = Video::get_merged_track(&url, MinHeight(height.unwrap_or(480))).await?;
-
-                let curr_format_id = track.track_info.format_id.clone();
-                if curr_format_id != format_id {
-                    warn!(
-                        "track_info desync: queued format {}, but playing {} format",
-                        format_id, curr_format_id
-                    );
-                }
-
-                let title = track.track_info.title.clone();
-                info!("starting {title}");
-
-                VlcClient::default()
-                    .oneshot(Track::MergedTrack(track), &title)
-                    .await
-            }
-            Args::QueueSplit {
-                url,
-                height,
-                format_id,
-            } => {
-                // the first run is just to get the title, we're running it again in case the URLs expire
-                let track = Video::get_split_track(&url, MinHeight(height.unwrap_or(480))).await?;
-
-                let curr_format_id = track.track_info.format_id.clone();
-                if curr_format_id != format_id {
-                    warn!(
-                        "track_info desync: queued format {}, but playing {} format",
-                        format_id, curr_format_id
-                    );
-                }
-
-                let title = track.track_info.title.clone();
-                info!("starting {title}");
-
-                VlcClient::default()
-                    .oneshot(Track::SplitTrack(track), &title)
-                    .await
-            }
-            Args::QueueFile { title, file } => {
-                info!("starting {title}");
-                VlcClient::default()
-                    .oneshot(Track::FileTrack(&file), &title)
-                    .await
-            }
-        }
-    }
-}
 
 pub struct QueueManager {
     queue: Arc<Mutex<VecDeque<Job>>>,
@@ -210,10 +121,14 @@ impl QueueManager {
         }
     }
 
-    pub async fn submit(&self, args: Args, metadata: TrackInfo) -> usize {
+    pub async fn submit(&self, args: JobType, metadata: TrackInfo) -> usize {
         let id = self.job_id.fetch_add(1, Ordering::SeqCst);
 
-        let job = Job { id, metadata, args };
+        let job = Job {
+            id,
+            metadata,
+            job_type: args,
+        };
         {
             let mut q = self.queue.lock().await;
             q.push_back(job);

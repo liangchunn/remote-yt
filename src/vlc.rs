@@ -37,17 +37,17 @@ impl VlcClient {
             .arg("--http-port=8081");
 
         match track {
-            Track::MergedTrack(merged_track) => child
+            Track::Merged(merged_track) => child
                 .arg("--meta-title")
                 .arg(title)
                 .arg(merged_track.merged_url),
-            Track::SplitTrack(split_track) => child
+            Track::Split(split_track) => child
                 .arg("--meta-title")
                 .arg(title)
                 .arg("--input-slave")
                 .arg(split_track.audio_url)
                 .arg(split_track.video_url),
-            Track::FileTrack(file) => child.arg("--meta-title").arg(title).arg(file),
+            Track::File(file) => child.arg("--meta-title").arg(title).arg(file),
         };
 
         Ok(child.spawn()?)

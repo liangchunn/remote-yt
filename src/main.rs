@@ -26,6 +26,7 @@ use crate::{
 };
 
 mod format;
+mod job;
 mod meta;
 mod queue;
 mod rpc;
@@ -97,7 +98,7 @@ async fn queue_merged_handler(
     let job_id = state
         .queue
         .submit(
-            queue::Args::QueueMerged {
+            job::JobType::QueueMerged {
                 url: payload.url,
                 height: payload.height,
                 format_id,
@@ -127,7 +128,7 @@ async fn queue_split_handler(
     let job_id = state
         .queue
         .submit(
-            queue::Args::QueueSplit {
+            job::JobType::QueueSplit {
                 url: payload.url,
                 height: payload.height,
                 format_id,
@@ -162,7 +163,7 @@ async fn queue_file_handler(
     let job_id = state
         .queue
         .submit(
-            queue::Args::QueueFile {
+            job::JobType::QueueFile {
                 title,
                 file: temp_file_clone,
             },

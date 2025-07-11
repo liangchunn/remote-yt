@@ -238,9 +238,9 @@ pub struct TrackInfo {
 }
 
 pub enum Track<'a> {
-    MergedTrack(MergedTrack),
-    SplitTrack(SplitTrack),
-    FileTrack(&'a PathBuf),
+    Merged(MergedTrack),
+    Split(SplitTrack),
+    File(&'a PathBuf),
 }
 
 #[derive(Deserialize)]
