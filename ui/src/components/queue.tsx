@@ -18,10 +18,38 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import {
+  DndContext,
+  TouchSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PropsWithChildren,
+} from "react";
 import style from "./animated-border.module.css";
 import clsx from "clsx";
-import { usePlayerCommandsMutation } from "@/lib/commands";
+import { usePlayerCommandsMutation, useQueueMutations } from "@/lib/commands";
+import {
+  arrayMove,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  restrictToParentElement,
+  restrictToVerticalAxis,
+} from "@dnd-kit/modifiers";
 
 export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
   const { data, error, isSuccess } = useQuery({
@@ -36,13 +64,49 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
     refetchInterval: 1000,
   });
 
+  const items = useMemo(() => data?.queue ?? [], [data]);
+
+  const [queue, setQueue] = useState(() => {
+    if (items.length > 1) {
+      return items.map((item) => ({ ...item, id: item.job_id })).slice(1);
+    } else {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    if (items.length > 1) {
+      setQueue(items.map((item) => ({ ...item, id: item.job_id })).slice(1));
+    } else {
+      setQueue([]);
+    }
+  }, [items]);
+
+  const sensors = useSensors(useSensor(PointerSensor), useSensor(TouchSensor));
+
+  const { reorder } = useQueueMutations();
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      setQueue((items) => {
+        const oldIndex = items.findIndex((id) => active.id === id.job_id);
+        const newIndex = items.findIndex((id) => over.id === id.job_id);
+
+        reorder(active.id as string, newIndex);
+
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  }
+
   // https://github.com/TanStack/query/discussions/6910
   const errorRef = useRef(error);
   if (error || isSuccess) errorRef.current = error;
 
-  const items = data?.queue ?? [];
   const nowPlaying = items[0] ?? null;
-  const queue = items.length > 1 ? items.slice(1) : [];
+
   const playerState = data?.player ?? null;
 
   if (errorRef.current) {
@@ -70,9 +134,23 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
         <div>
           <h1 className="text-lg font-semibold mb-1 tracking-tight">Up Next</h1>
           <div className="flex flex-col gap-2">
-            {queue.map((item) => (
-              <QueueListItem key={item.job_id} item={item} />
-            ))}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+              modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+            >
+              <SortableContext
+                items={queue}
+                strategy={verticalListSortingStrategy}
+              >
+                {queue.map((item) => (
+                  <DraggableItem id={item.job_id} key={item.job_id}>
+                    <QueueListItem item={item} />
+                  </DraggableItem>
+                ))}
+              </SortableContext>
+            </DndContext>
             {isMutationPending && <QueueListItem item={null} />}
           </div>
         </div>
@@ -377,6 +455,20 @@ function formatTime(seconds: number) {
   }
 }
 
+function DraggableItem({ id, children }: PropsWithChildren<{ id: string }>) {
+  const { attributes, listeners, setNodeRef, transform, transition } =
+    useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      {children}
+    </div>
+  );
+}
+
 function QueueListItem({ item }: { item: QueueItem | null }) {
   const mutation = useMutation({
     mutationFn: (job_id: string) => {
@@ -393,7 +485,10 @@ function QueueListItem({ item }: { item: QueueItem | null }) {
   }, [info, item, mutation]);
   const isRemoving = mutation.isPending;
   return (
-    <div className="flex items-center border rounded-md overflow-hidden gap-2">
+    <div
+      className="flex items-center border rounded-md overflow-hidden gap-2"
+      style={style}
+    >
       {info ? (
         <img
           src={info.thumbnail}
@@ -409,7 +504,9 @@ function QueueListItem({ item }: { item: QueueItem | null }) {
       <div className="flex-1 py-3 pl-1">
         {info ? (
           <>
-            <p className="leading-4 mb-0.5">{info.title}</p>
+            <p className="leading-4 mb-0.5">
+              ID: {item.job_id} - {info.title}
+            </p>
             <p className="text-muted-foreground text-sm mb-1">{info.channel}</p>
             <div className="flex items-center gap-1 top-1 right-1">
               <VideoMetaMemoized

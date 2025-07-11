@@ -45,3 +45,27 @@ export function usePlayerCommandsMutation() {
     fullVolume,
   };
 }
+
+export function useQueueMutations() {
+  const queryClient = useQueryClient();
+
+  const reorderMutation = useMutation({
+    mutationFn: ({ job_id, new_pos }: { job_id: string; new_pos: number }) =>
+      (async () => {
+        await fetch(`/api/move/${job_id}/${new_pos}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+        queryClient.invalidateQueries({
+          queryKey: ["queue"],
+        });
+      })(),
+  });
+
+  const reorder = (jobId: string, newPos: number) =>
+    reorderMutation.mutate({ job_id: jobId, new_pos: newPos });
+
+  return { reorder };
+}

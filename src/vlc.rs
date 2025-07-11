@@ -47,7 +47,7 @@ impl VlcClient {
                 .arg("--input-slave")
                 .arg(split_track.audio_url)
                 .arg(split_track.video_url),
-            Track::FileTrack(file) => child.arg("--meta-title").arg(title).arg(file.as_ref()),
+            Track::FileTrack(file) => child.arg("--meta-title").arg(title).arg(file),
         };
 
         Ok(child.spawn()?)

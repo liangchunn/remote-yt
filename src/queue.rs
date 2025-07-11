@@ -1,36 +1,115 @@
 use std::{
     collections::VecDeque,
+    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 
-use futures::future::BoxFuture;
 use tokio::{
     process::Child,
     sync::{Mutex, Notify},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
-use crate::{meta::InspectMetadata, yt_dlp::TrackInfo};
+use crate::{
+    format::MinHeight,
+    meta::InspectMetadata,
+    vlc::VlcClient,
+    yt_dlp::{Track, TrackInfo, Video},
+};
 
-type BoxedCommand = Box<dyn FnOnce() -> BoxFuture<'static, Result<Child, anyhow::Error>> + Send>;
-type CleanupFn = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;
+#[derive(Clone, Debug)]
+pub enum Args {
+    QueueMerged {
+        url: String,
+        height: Option<u32>,
+        format_id: String,
+    },
+    QueueSplit {
+        url: String,
+        height: Option<u32>,
+        format_id: String,
+    },
+    QueueFile {
+        title: String,
+        file: PathBuf,
+    },
+}
 
+#[derive(Clone, Debug)]
 struct Job {
     pub id: usize,
     pub metadata: TrackInfo,
-    pub task: BoxedCommand,
-    pub cleanup: CleanupFn,
+    pub args: Args,
+}
+
+impl Job {
+    async fn execute(self) -> anyhow::Result<Child> {
+        match self.args {
+            Args::QueueMerged {
+                url,
+                height,
+                format_id,
+            } => {
+                // the first run is just to get the title, we're running it again in case the URLs expire
+                let track = Video::get_merged_track(&url, MinHeight(height.unwrap_or(480))).await?;
+
+                let curr_format_id = track.track_info.format_id.clone();
+                if curr_format_id != format_id {
+                    warn!(
+                        "track_info desync: queued format {}, but playing {} format",
+                        format_id, curr_format_id
+                    );
+                }
+
+                let title = track.track_info.title.clone();
+                info!("starting {title}");
+
+                VlcClient::default()
+                    .oneshot(Track::MergedTrack(track), &title)
+                    .await
+            }
+            Args::QueueSplit {
+                url,
+                height,
+                format_id,
+            } => {
+                // the first run is just to get the title, we're running it again in case the URLs expire
+                let track = Video::get_split_track(&url, MinHeight(height.unwrap_or(480))).await?;
+
+                let curr_format_id = track.track_info.format_id.clone();
+                if curr_format_id != format_id {
+                    warn!(
+                        "track_info desync: queued format {}, but playing {} format",
+                        format_id, curr_format_id
+                    );
+                }
+
+                let title = track.track_info.title.clone();
+                info!("starting {title}");
+
+                VlcClient::default()
+                    .oneshot(Track::SplitTrack(track), &title)
+                    .await
+            }
+            Args::QueueFile { title, file } => {
+                info!("starting {title}");
+                VlcClient::default()
+                    .oneshot(Track::FileTrack(&file), &title)
+                    .await
+            }
+        }
+    }
 }
 
 pub struct QueueManager {
     queue: Arc<Mutex<VecDeque<Job>>>,
     notify: Arc<Notify>,
-    running: Arc<Mutex<Option<(usize, CancellationToken)>>>,
-    current: Arc<Mutex<Option<(usize, TrackInfo)>>>,
+    running: Arc<Mutex<Option<(Job, CancellationToken)>>>,
+    current: Arc<Mutex<Option<(Job, TrackInfo)>>>,
     clear_requested: Arc<AtomicBool>,
     job_id: Arc<AtomicUsize>,
 }
@@ -73,15 +152,14 @@ impl QueueManager {
                 let cancel_token = CancellationToken::new();
                 {
                     let mut lock = running_ref.lock().await;
-                    *lock = Some((job.id, cancel_token.clone()));
+                    *lock = Some((job.clone(), cancel_token.clone()));
                 }
-
                 {
                     let mut current_lock = current_ref.lock().await;
-                    *current_lock = Some((job.id, job.metadata));
+                    *current_lock = Some((job.clone(), job.metadata.clone()));
                 }
 
-                let mut child = match (job.task)().await {
+                let mut child = match job.execute().await {
                     Ok(child) => child,
                     Err(e) => {
                         error!("failed to start process: {e}");
@@ -111,9 +189,6 @@ impl QueueManager {
                     *current_lock = None;
                 }
 
-                info!("running cleanup for job {}", job.id);
-                (job.cleanup)().await;
-
                 if clear_ref.load(Ordering::SeqCst) {
                     info!("clearing pending tasks...");
                     {
@@ -135,30 +210,16 @@ impl QueueManager {
         }
     }
 
-    pub async fn submit<F, Fut, C, CFut>(&self, f: F, metadata: TrackInfo, cleanup: C) -> usize
-    where
-        F: FnOnce() -> Fut + Send + 'static,
-        Fut: Future<Output = Result<Child, anyhow::Error>> + Send + 'static,
-        C: FnOnce() -> CFut + Send + 'static,
-        CFut: Future<Output = ()> + Send + 'static,
-    {
-        let task: BoxedCommand = Box::new(|| Box::pin(f()));
-        let cleanup: CleanupFn = Box::new(|| Box::pin(cleanup()));
+    pub async fn submit(&self, args: Args, metadata: TrackInfo) -> usize {
         let id = self.job_id.fetch_add(1, Ordering::SeqCst);
 
-        let job = Job {
-            id,
-            metadata,
-            task,
-            cleanup,
-        };
-        let job_id = job.id;
+        let job = Job { id, metadata, args };
         {
             let mut q = self.queue.lock().await;
             q.push_back(job);
         }
         self.notify.notify_one();
-        job_id
+        id
     }
 
     pub async fn cancel_by_id(&self, job_id: usize) -> bool {
@@ -168,11 +229,8 @@ impl QueueManager {
             let index = q.iter().position(|job| job.id == job_id);
 
             if let Some(i) = index {
-                let job = q.remove(i).unwrap();
+                q.remove(i).unwrap();
                 drop(q); // Release the lock early before running async cleanup
-
-                info!("running cleanup for cancelled job {}", job.id);
-                (job.cleanup)().await;
 
                 info!("cancelled job {job_id} from queue");
                 return true;
@@ -182,8 +240,8 @@ impl QueueManager {
         // Then try to cancel running task
         {
             let lock = self.running.lock().await;
-            if let Some((running_id, token)) = lock.as_ref() {
-                if *running_id == job_id {
+            if let Some((running_job, token)) = lock.as_ref() {
+                if running_job.id == job_id {
                     token.cancel();
                     info!("cancelled currently running job {job_id}");
                     return true;
@@ -197,9 +255,9 @@ impl QueueManager {
 
     pub async fn cancel(&self) -> bool {
         let mut lock = self.running.lock().await;
-        if let Some((job_id, token)) = lock.take() {
+        if let Some((job, token)) = lock.take() {
             token.cancel();
-            info!("cancelling current job {job_id}");
+            info!("cancelling current job {}", job.id);
             true
         } else {
             info!("nothing to cancel");
@@ -210,9 +268,9 @@ impl QueueManager {
     pub async fn clear(&self) {
         {
             let mut lock = self.running.lock().await;
-            if let Some((job_id, token)) = lock.take() {
+            if let Some((job, token)) = lock.take() {
                 token.cancel();
-                info!("clear: cancelling current job {job_id}");
+                info!("clear: cancelling current job {}", job.id);
             } else {
                 info!("nothing to clear");
             }
@@ -224,8 +282,7 @@ impl QueueManager {
         drop(q);
 
         for job in drained_jobs {
-            info!("running cleanup for cancelled job {}", job.id);
-            (job.cleanup)().await;
+            info!("cancelled job {}", job.id);
         }
 
         self.clear_requested.store(true, Ordering::SeqCst);
@@ -234,9 +291,9 @@ impl QueueManager {
     pub async fn inspect(&self) -> Vec<InspectMetadata> {
         let mut result = vec![];
 
-        if let Some((job_id, metadata)) = self.current.lock().await.clone() {
+        if let Some((job, metadata)) = self.current.lock().await.clone() {
             result.push(InspectMetadata {
-                job_id,
+                job_id: job.id,
                 current: true,
                 track_info: metadata.clone(),
             })
@@ -251,5 +308,80 @@ impl QueueManager {
         }
 
         result
+    }
+
+    pub async fn reorder_job(&self, job_id: usize, new_index: usize) -> anyhow::Result<()> {
+        let mut q = self.queue.lock().await;
+
+        if let Some(old_pos) = q.iter().position(|job| job.id == job_id) {
+            if old_pos == new_index {
+                return Ok(());
+            }
+
+            let job = q.remove(old_pos).unwrap();
+
+            // After removing an element at old_pos:
+            // - Elements before old_pos keep their indices
+            // - Elements after old_pos shift left by 1
+
+            let insert_pos = if new_index > old_pos {
+                // Moving to higher index (toward back)
+                // Account for the shift caused by removal
+                (new_index - 1).min(q.len())
+            } else {
+                // Moving to lower index (toward front)
+                // No adjustment needed
+                new_index
+            };
+
+            q.insert(insert_pos, job);
+
+            info!("reordered job {job_id} from position {old_pos} to position {new_index}");
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "job {job_id} not found in queue or already running"
+            ))
+        }
+    }
+
+    pub async fn swap_with_running(&self, job_id: usize) -> anyhow::Result<()> {
+        // Lock queue
+        let mut q = self.queue.lock().await;
+
+        let target_index = q.iter().position(|job| job.id == job_id);
+        if target_index.is_none() {
+            return Err(anyhow::anyhow!("job {job_id} not found in queue"));
+        }
+
+        // Lock currently running job
+        let running_lock = self.running.lock().await;
+        if running_lock.is_none() {
+            return Err(anyhow::anyhow!("no job is currently running"));
+        }
+
+        let (running_job, cancel_token) = running_lock.as_ref().unwrap().clone();
+
+        if running_job.id == job_id {
+            return Err(anyhow::anyhow!("cannot swap a job with itself"));
+        }
+
+        let target_index = target_index.unwrap();
+
+        // First, replace the target job with the running job
+        let swapped_job = std::mem::replace(&mut q[target_index], running_job.clone());
+
+        // Then push the swapped job to the front
+        q.push_front(swapped_job);
+
+        // Trigger cancellation of the currently running job
+        cancel_token.cancel();
+
+        info!(
+            "swapped running job {} with queued job {}",
+            running_job.id, job_id
+        );
+
+        Ok(())
     }
 }

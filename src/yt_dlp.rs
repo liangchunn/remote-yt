@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use glob::glob;
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
@@ -238,7 +240,7 @@ pub struct TrackInfo {
 pub enum Track<'a> {
     MergedTrack(MergedTrack),
     SplitTrack(SplitTrack),
-    FileTrack(&'a NamedTempFile),
+    FileTrack(&'a PathBuf),
 }
 
 #[derive(Deserialize)]

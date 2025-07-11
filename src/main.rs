@@ -15,15 +15,14 @@ use tower_http::{
     compression::CompressionLayer,
     services::{ServeDir, ServeFile},
 };
-use tracing::{Level, error, info, warn};
+use tracing::{Level, error, info};
 
 use crate::{
     format::MinHeight,
     meta::InspectMetadata,
     queue::QueueManager,
     rpc::{Rpc, RpcCommand, RpcResponse},
-    vlc::VlcClient,
-    yt_dlp::{Track, Video},
+    yt_dlp::Video,
 };
 
 mod format;
@@ -59,6 +58,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/clear", post(clear_handler))
         .route("/api/inspect", get(inspect_handler))
         .route("/api/execute_command", post(player_commands))
+        .route("/api/swap/{id}", post(swap))
+        .route("/api/move/{id}/{new_pos}", post(move_to))
         .layer(CompressionLayer::new())
         .with_state(app_state)
         .fallback_service(serve_app);
@@ -90,39 +91,18 @@ async fn queue_merged_handler(
     let merged_track =
         Video::get_merged_track(&payload.url, MinHeight(payload.height.unwrap_or(480))).await?;
 
-    let pre_format_id = merged_track.track_info.format_id.clone();
+    let format_id = merged_track.track_info.format_id.clone();
     let track_info = merged_track.track_info;
 
     let job_id = state
         .queue
         .submit(
-            async move || {
-                {
-                    // the first run is just to get the title, we're running it again in case the URLs expire
-                    let track = Video::get_merged_track(
-                        &payload.url,
-                        MinHeight(payload.height.unwrap_or(480)),
-                    )
-                    .await?;
-
-                    let post_format_id = track.track_info.format_id.clone();
-                    if pre_format_id != post_format_id {
-                        warn!(
-                            "track_info desync: queued format {}, but playing {} format",
-                            pre_format_id, post_format_id
-                        );
-                    }
-
-                    let title = track.track_info.title.clone();
-                    info!("starting {title}");
-
-                    VlcClient::default()
-                        .oneshot(Track::MergedTrack(track), &title)
-                        .await
-                }
+            queue::Args::QueueMerged {
+                url: payload.url,
+                height: payload.height,
+                format_id,
             },
             track_info,
-            async move || {},
         )
         .await;
 
@@ -141,35 +121,18 @@ async fn queue_split_handler(
     let split_track =
         Video::get_split_track(&payload.url, MinHeight(payload.height.unwrap_or(480))).await?;
 
-    let pre_format_id = split_track.track_info.format_id.clone();
+    let format_id = split_track.track_info.format_id.clone();
     let track_info = split_track.track_info;
 
     let job_id = state
         .queue
         .submit(
-            async move || {
-                // the first run is just to get the title, we're running it again in case the URLs expire
-                let track =
-                    Video::get_split_track(&payload.url, MinHeight(payload.height.unwrap_or(480)))
-                        .await?;
-
-                let post_format_id = track.track_info.format_id.clone();
-                if pre_format_id != post_format_id {
-                    warn!(
-                        "track_info desync: queued format {}, but playing {} format",
-                        pre_format_id, post_format_id
-                    );
-                }
-
-                let title = track.track_info.title.clone();
-                info!("starting {title}");
-
-                VlcClient::default()
-                    .oneshot(Track::SplitTrack(track), &title)
-                    .await
+            queue::Args::QueueSplit {
+                url: payload.url,
+                height: payload.height,
+                format_id,
             },
             track_info,
-            async move || {},
         )
         .await;
 
@@ -199,21 +162,11 @@ async fn queue_file_handler(
     let job_id = state
         .queue
         .submit(
-            async move || {
-                info!("starting {title}");
-                VlcClient::default()
-                    .oneshot(Track::FileTrack(&temp_file), &title)
-                    .await
+            queue::Args::QueueFile {
+                title,
+                file: temp_file_clone,
             },
             track_info,
-            async move || {
-                match tokio::fs::remove_file(temp_file_clone.clone()).await {
-                    Ok(()) => info!("deleted file {}", temp_file_clone.display()),
-                    Err(e) => {
-                        error!("failed to delete file {}: {}", temp_file_clone.display(), e)
-                    }
-                };
-            },
         )
         .await;
 
@@ -272,6 +225,24 @@ async fn player_commands(
     Json(command): Json<RpcCommand>,
 ) -> Result<Json<bool>, AppError> {
     state.rpc.execute_command(command).await?;
+    Ok(Json(true))
+}
+
+async fn swap(
+    State(state): State<Arc<AppState>>,
+    Path(job_id): Path<usize>,
+) -> Result<Json<bool>, AppError> {
+    state.queue.swap_with_running(job_id).await?;
+
+    Ok(Json(true))
+}
+
+async fn move_to(
+    State(state): State<Arc<AppState>>,
+    Path((job_id, new_index)): Path<(usize, usize)>,
+) -> Result<Json<bool>, AppError> {
+    state.queue.reorder_job(job_id, new_index).await?;
+
     Ok(Json(true))
 }
 
