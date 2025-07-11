@@ -91,13 +91,15 @@ function NowPlaying({
   playerState: PlayerState | null;
 }) {
   const info = item?.track_info;
+  const isGreyBorder = !info || (playerState && playerState.state === "paused");
   return (
     // TODO: when pausing, scale to 95%: "transition-transform scale-95"
     <div
       className={clsx(
-        info && [style.bbbb, "border-transparent"],
-        !info && "border-muted-background",
-        "border-[3px] border-solid rounded-md overflow-hidden relative"
+        !isGreyBorder && [style.bbbb, "border-transparent"],
+        isGreyBorder && "border-muted-background",
+        "border-[3px] border-solid rounded-md overflow-hidden relative transition-transform",
+        playerState?.state === "paused" ? "scale-99" : "scale-100"
       )}
     >
       {!info && (
@@ -129,11 +131,12 @@ function NowPlaying({
         )}
         {info && (
           <div className="flex justify-center items-center gap-1 absolute top-1 right-1">
-            <Badge label={`${info.width}×${info.height}`} />
-            <Codec
+            <VideoMetaMemoized
               acodec={info.acodec}
               vcodec={info.vcodec}
               track_type={info.track_type}
+              width={info.width}
+              height={info.height}
             />
           </div>
         )}
@@ -245,7 +248,7 @@ function PlayerProgress({ playerState }: { playerState: PlayerState | null }) {
   const [dragTime, setDragTime] = useState<number | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
 
-  const { seekTo, mute, fullVolume } = usePlayerCommandsMutation();
+  const { seekTo } = usePlayerCommandsMutation();
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!playerState || !barRef.current) return;
@@ -292,13 +295,6 @@ function PlayerProgress({ playerState }: { playerState: PlayerState | null }) {
   );
   const totalString = playerState ? formatTime(playerState.length) : "";
   const isMuted = playerState ? playerState.volume === 0 : false;
-  const handleVolume = () => {
-    if (isMuted) {
-      fullVolume();
-    } else {
-      mute();
-    }
-  };
 
   return (
     <div
@@ -315,15 +311,7 @@ function PlayerProgress({ playerState }: { playerState: PlayerState | null }) {
         </p>
       </div>
       <div className="absolute bottom-6.5 right-0 pr-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="cursor-pointer hover:bg-muted/15"
-          onClick={handleVolume}
-        >
-          {!isMuted && <Volume2 className="stroke-white/80" />}
-          {isMuted && <VolumeX className="stroke-white/80" />}
-        </Button>
+        <MutedButtonMemoized isMuted={isMuted} />
       </div>
       <div
         className="absolute bottom-1.5 left-0 w-full h-6 px-4 cursor-pointer touch-none"
@@ -349,6 +337,29 @@ function PlayerProgress({ playerState }: { playerState: PlayerState | null }) {
         </div>
       </div>
     </div>
+  );
+}
+
+const MutedButtonMemoized = memo(MuteButton);
+
+function MuteButton({ isMuted }: { isMuted: boolean }) {
+  const { fullVolume, mute } = usePlayerCommandsMutation();
+  const handleVolume = () => {
+    if (isMuted) {
+      fullVolume();
+    } else {
+      mute();
+    }
+  };
+  return (
+    <Button
+      variant="ghost"
+      className="cursor-pointer hover:bg-muted/15 size-6"
+      onClick={handleVolume}
+    >
+      {!isMuted && <Volume2 className="stroke-white/80" />}
+      {isMuted && <VolumeX className="stroke-white/80" />}
+    </Button>
   );
 }
 
@@ -401,11 +412,12 @@ function QueueListItem({ item }: { item: QueueItem | null }) {
             <p className="leading-4 mb-0.5">{info.title}</p>
             <p className="text-muted-foreground text-sm mb-1">{info.channel}</p>
             <div className="flex items-center gap-1 top-1 right-1">
-              <Badge label={`${info.width}×${info.height}`} />
-              <Codec
+              <VideoMetaMemoized
                 acodec={info.acodec}
                 vcodec={info.vcodec}
                 track_type={info.track_type}
+                width={info.width}
+                height={info.height}
               />
             </div>
           </>
@@ -437,6 +449,23 @@ function trimFormat(codec: string) {
   } else {
     return codec;
   }
+}
+
+const VideoMetaMemoized = memo(VideoMeta);
+
+function VideoMeta({
+  acodec,
+  vcodec,
+  track_type,
+  width,
+  height,
+}: Pick<TrackInfo, "acodec" | "vcodec" | "track_type" | "width" | "height">) {
+  return (
+    <>
+      <Badge label={`${width}×${height}`} />
+      <Codec acodec={acodec} track_type={track_type} vcodec={vcodec} />
+    </>
+  );
 }
 
 function Codec({
