@@ -64,8 +64,35 @@ export function useQueueMutations() {
       })(),
   });
 
+  const cancelMutation = useMutation({
+    mutationFn: (job_id: string) => {
+      return fetch(`/api/cancel/${job_id}`, {
+        method: "POST",
+      });
+    },
+  });
+
+  const swapMutation = useMutation({
+    mutationFn: (job_id: string) => {
+      return fetch(`/api/swap/${job_id}`, {
+        method: "POST",
+      });
+    },
+  });
+
+  const clearMutation = useMutation({
+    mutationFn: () => {
+      return fetch(`/api/clear`, {
+        method: "POST",
+      });
+    },
+  });
+
   const reorder = (jobId: string, newPos: number) =>
     reorderMutation.mutate({ job_id: jobId, new_pos: newPos });
+  const cancel = (jobId: string) => cancelMutation.mutate(jobId);
+  const swap = (jobId: string) => swapMutation.mutate(jobId);
+  const clear = () => clearMutation.mutate();
 
-  return { reorder };
+  return { reorder, cancel, swap, clear };
 }

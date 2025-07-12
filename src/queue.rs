@@ -228,66 +228,67 @@ impl QueueManager {
     pub async fn reorder_job(&self, job_id: usize, new_index: usize) -> anyhow::Result<()> {
         let mut q = self.queue.lock().await;
 
-        if let Some(old_pos) = q.iter().position(|job| job.id == job_id) {
-            if old_pos == new_index {
-                return Ok(());
-            }
+        // Find the job in the queue
+        let old_pos = q
+            .iter()
+            .position(|job| job.id == job_id)
+            .ok_or_else(|| anyhow::anyhow!("job {job_id} not found in queue or already running"))?;
 
-            let job = q.remove(old_pos).unwrap();
-
-            // After removing an element at old_pos:
-            // - Elements before old_pos keep their indices
-            // - Elements after old_pos shift left by 1
-
-            let insert_pos = if new_index > old_pos {
-                // Moving to higher index (toward back)
-                // Account for the shift caused by removal
-                (new_index - 1).min(q.len())
-            } else {
-                // Moving to lower index (toward front)
-                // No adjustment needed
-                new_index
-            };
-
-            q.insert(insert_pos, job);
-
-            info!("reordered job {job_id} from position {old_pos} to position {new_index}");
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!(
-                "job {job_id} not found in queue or already running"
-            ))
+        if old_pos == new_index {
+            return Ok(());
         }
+
+        // Convert to Vec for predictable behavior
+        let mut items: Vec<Job> = q.drain(..).collect();
+
+        // Remove the job from its current position
+        let job = items.remove(old_pos);
+
+        // Insert at the new position (clamped to valid range)
+        let target_index = new_index.min(items.len());
+        items.insert(target_index, job);
+
+        // Convert back to VecDeque
+        q.extend(items);
+
+        info!("reordered job {job_id} from position {old_pos} to position {new_index}");
+        Ok(())
     }
 
     pub async fn swap_with_running(&self, job_id: usize) -> anyhow::Result<()> {
         // Lock queue
         let mut q = self.queue.lock().await;
 
-        let target_index = q.iter().position(|job| job.id == job_id);
-        if target_index.is_none() {
-            return Err(anyhow::anyhow!("job {job_id} not found in queue"));
-        }
+        let target_index = q
+            .iter()
+            .position(|job| job.id == job_id)
+            .ok_or_else(|| anyhow::anyhow!("job {job_id} not found in queue"))?;
 
         // Lock currently running job
         let running_lock = self.running.lock().await;
-        if running_lock.is_none() {
-            return Err(anyhow::anyhow!("no job is currently running"));
-        }
-
-        let (running_job, cancel_token) = running_lock.as_ref().unwrap().clone();
+        let (running_job, cancel_token) = running_lock
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no job is currently running"))?
+            .clone();
 
         if running_job.id == job_id {
             return Err(anyhow::anyhow!("cannot swap a job with itself"));
         }
 
-        let target_index = target_index.unwrap();
+        // Convert to Vec for manipulation
+        let mut items: Vec<Job> = q.drain(..).collect();
 
-        // First, replace the target job with the running job
-        let swapped_job = std::mem::replace(&mut q[target_index], running_job.clone());
+        // Remove the target job and insert it at the front
+        let swapped_job = items.remove(target_index);
+        items.insert(0, swapped_job);
 
-        // Then push the swapped job to the front
-        q.push_front(swapped_job);
+        // Now insert the running job where the target job was
+        // Since we removed one item and added it at the front,
+        // the original index is now at target_index
+        items.insert(target_index + 1, running_job.clone());
+
+        // Convert back to VecDeque
+        q.extend(items);
 
         // Trigger cancellation of the currently running job
         cancel_token.cancel();

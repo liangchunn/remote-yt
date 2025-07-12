@@ -57,7 +57,7 @@ export function Form({
         </SelectContent>
       </Select>
 
-      <Button>Add</Button>
+      <Button>Queue</Button>
     </form>
   );
 }

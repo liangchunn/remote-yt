@@ -7,7 +7,6 @@ import type {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "./ui/button";
 import {
-  X,
   LoaderCircle,
   SkipForward,
   Pause,
@@ -17,19 +16,21 @@ import {
   Play,
   Volume2,
   VolumeX,
+  ChevronDown,
+  Trash,
+  X,
 } from "lucide-react";
 import {
   DndContext,
   TouchSensor,
-  PointerSensor,
   useSensor,
   useSensors,
   closestCenter,
   type DragEndEvent,
+  MouseSensor,
 } from "@dnd-kit/core";
 import {
   memo,
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -50,6 +51,23 @@ import {
   restrictToParentElement,
   restrictToVerticalAxis,
 } from "@dnd-kit/modifiers";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "./ui/alert-dialog";
 
 export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
   const { data, error, isSuccess } = useQuery({
@@ -82,10 +100,16 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
     }
   }, [items]);
 
-  const sensors = useSensors(useSensor(PointerSensor), useSensor(TouchSensor));
-
+  const sensors = useSensors(
+    useSensor(MouseSensor),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250,
+        tolerance: 5,
+      },
+    })
+  );
   const { reorder } = useQueueMutations();
-
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
 
@@ -106,7 +130,6 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
   if (error || isSuccess) errorRef.current = error;
 
   const nowPlaying = items[0] ?? null;
-
   const playerState = data?.player ?? null;
 
   if (errorRef.current) {
@@ -118,8 +141,8 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
   }
 
   return (
-    <div>
-      <div className="mb-4">
+    <div className="flex flex-col gap-4">
+      <div>
         <h1 className="text-lg font-semibold mb-1 tracking-tight">
           Now Playing
         </h1>
@@ -155,6 +178,46 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
           </div>
         </div>
       )}
+      <p className="text-sm text-primary/33 text-center">
+        Hint: Drag thumbnail to reorder items
+      </p>
+      <ClearAllButton show={!!nowPlaying || queue.length > 0} />
+    </div>
+  );
+}
+
+function ClearAllButton({ show }: { show: boolean }) {
+  const { clear } = useQueueMutations();
+
+  if (!show) {
+    return null;
+  }
+  return (
+    <div className="flex justify-center">
+      <AlertDialog>
+        <AlertDialogTrigger>
+          <Button size="sm" variant="ghost" className="text-muted-foreground">
+            <X /> Clear all
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Clear everything and stop player?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This will clear everything in the queue and stop the player. This
+              action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => clear()}>
+              Clear and stop
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -382,7 +445,7 @@ function PlayerProgress({ playerState }: { playerState: PlayerState | null }) {
     >
       <div className="absolute bottom-0 left-0 w-full h-24 bg-gradient-to-t from-black/70 to-black/0" />
       <div className="absolute bottom-6.5 left-0 pl-4">
-        <p className="tracking-tight text-sm text-white/50 font-mono">
+        <p className="tracking-tight text-sm text-white/80 font-mono">
           <span>{currString}</span>
           <span className="mx-0.5">/</span>
           <span>{totalString}</span>
@@ -462,31 +525,27 @@ function DraggableItem({ id, children }: PropsWithChildren<{ id: string }>) {
     transform: CSS.Transform.toString(transform),
     transition,
   };
+
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <div ref={setNodeRef} style={style} className="relative">
       {children}
+      <div
+        {...attributes}
+        {...listeners}
+        className="absolute top-0 left-0 w-36 h-full select-none touch-none cursor-grab"
+      >
+        <div className="flex items-center justify-center h-full w-[calc(100%+1px)] rounded-tl-md rounded-bl-md hover:bg-white/50 active:bg-white/50 transition"></div>
+      </div>
     </div>
   );
 }
 
 function QueueListItem({ item }: { item: QueueItem | null }) {
-  const mutation = useMutation({
-    mutationFn: (job_id: string) => {
-      return fetch(`/api/cancel/${job_id}`, {
-        method: "POST",
-      });
-    },
-  });
+  const { cancel, swap } = useQueueMutations();
   const info = item?.track_info;
-  const handleUnqueue = useCallback(() => {
-    if (info) {
-      mutation.mutate(item.job_id);
-    }
-  }, [info, item, mutation]);
-  const isRemoving = mutation.isPending;
   return (
     <div
-      className="flex items-center border rounded-md overflow-hidden gap-2"
+      className="flex items-center border rounded-md overflow-hidden gap-2 bg-white select-none"
       style={style}
     >
       {info ? (
@@ -504,9 +563,7 @@ function QueueListItem({ item }: { item: QueueItem | null }) {
       <div className="flex-1 py-3 pl-1">
         {info ? (
           <>
-            <p className="leading-4 mb-0.5">
-              ID: {item.job_id} - {info.title}
-            </p>
+            <p className="leading-4 mb-0.5">{info.title}</p>
             <p className="text-muted-foreground text-sm mb-1">{info.channel}</p>
             <div className="flex items-center gap-1 top-1 right-1">
               <VideoMetaMemoized
@@ -523,18 +580,31 @@ function QueueListItem({ item }: { item: QueueItem | null }) {
         )}
       </div>
       <div className="self-start">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8"
-          onClick={handleUnqueue}
-          disabled={!item || isRemoving}
-        >
-          {isRemoving && (
-            <LoaderCircle className="animate-spin text-muted-foreground" />
-          )}
-          {!isRemoving && <X />}
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              disabled={!item}
+            >
+              <ChevronDown />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => item && swap(item.job_id)}>
+              <Play className="mr-1" />
+              Play now
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => item && cancel(item.job_id)}
+            >
+              <Trash className="mr-1" />
+              Remove item
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
   );
