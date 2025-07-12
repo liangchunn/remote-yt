@@ -254,7 +254,7 @@ function NowPlaying({
       )}
       <div className="relative">
         {info && <img src={info.thumbnail} className="aspect-video bg-muted" />}
-        {playerState === null && (
+        {playerState === null && item && (
           <div className="absolute w-full h-full top-0 left-0 select-none flex items-center justify-center">
             <LoaderCircle className="h-8 w-8 animate-spin text-white/50" />
           </div>
@@ -286,10 +286,10 @@ function NowPlaying({
         {!item && (
           <>
             <h3 className="font-medium text-lg text-center text-muted-foreground">
-              Nothing playing
+              {isMutationPending ? "Adding to queue..." : "Nothing playing"}
             </h3>
             <p className=" text-sm text-center text-muted-foreground">
-              Add something to the queue
+              {isMutationPending ? "Just a sec" : "Add something to the queue"}
             </p>
           </>
         )}

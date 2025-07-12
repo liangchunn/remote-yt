@@ -265,7 +265,9 @@ impl IntoResponse for AppError {
         eprintln!("Internal error: {:?}", self.0); // Logging
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Internal Server Error: {}", self.0),
+            Json(serde_json::json!({
+                "error": self.0.to_string()
+            })),
         )
             .into_response()
     }

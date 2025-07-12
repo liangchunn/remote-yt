@@ -2,6 +2,7 @@ import { Queue } from "./components/queue";
 import { Form } from "./components/form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { VideoType } from "./types/inspect";
+import { toast } from "sonner";
 
 export default function App() {
   const queryClient = useQueryClient();
@@ -22,12 +23,19 @@ export default function App() {
           "Content-Type": "application/json",
         },
       });
-      return await resp.json();
+      const json = await resp.json();
+      if (json.error) {
+        throw new Error(json.error);
+      }
+      return json;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["queue"],
       });
+    },
+    onError: (e) => {
+      toast.error(`Failed to queue: ${e.message}`);
     },
   });
   return (
