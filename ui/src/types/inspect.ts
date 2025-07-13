@@ -1,5 +1,6 @@
 export type InspectApi = {
-  queue: QueueItem[];
+  now_playing: InspectItem | null;
+  queue: InspectItem[];
   player: PlayerState | null;
 };
 
@@ -10,7 +11,7 @@ export type PlayerState = {
   volume: number;
 };
 
-export type QueueItem = {
+export type InspectItem = {
   job_id: string;
   current: boolean;
   track_info: TrackInfo;
@@ -26,6 +27,7 @@ export type TrackInfo = {
   width: number | null;
   thumbnail: string;
   track_type: "merged" | "split";
+  duration: number;
 };
 
 export type VideoType = "merged" | "split";

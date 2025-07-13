@@ -202,6 +202,7 @@ async fn clear_handler(State(state): State<Arc<AppState>>) -> &'static str {
 
 #[derive(Serialize)]
 struct InspectResponse {
+    now_playing: Option<InspectMetadata>,
     queue: Vec<InspectMetadata>,
     player: Option<RpcResponse>,
 }
@@ -209,7 +210,8 @@ struct InspectResponse {
 async fn inspect_handler(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<InspectResponse>, AppError> {
-    let (queue, player) = tokio::join!(state.queue.inspect(), state.rpc.get_status());
+    let ((now_playing, queue), player) =
+        tokio::join!(state.queue.inspect(), state.rpc.get_status());
     let player = match player {
         Ok(v) => Some(v),
         Err(e) => {
@@ -218,7 +220,11 @@ async fn inspect_handler(
         }
     };
 
-    Ok(Json(InspectResponse { queue, player }))
+    Ok(Json(InspectResponse {
+        now_playing,
+        queue,
+        player,
+    }))
 }
 
 async fn player_commands(

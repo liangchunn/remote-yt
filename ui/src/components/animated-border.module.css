@@ -10,7 +10,7 @@
   inherits: false;
 }
 
-.bbbb {
+.shiny {
   background:
     linear-gradient(white, white) padding-box,
     linear-gradient(var(--angle), rgb(66, 136, 250), rgb(210, 252, 253), rgb(211, 171, 253), rgb(66, 136, 250), rgb(250, 227, 230)) border-box;

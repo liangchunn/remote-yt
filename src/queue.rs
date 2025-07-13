@@ -203,26 +203,29 @@ impl QueueManager {
         self.clear_requested.store(true, Ordering::SeqCst);
     }
 
-    pub async fn inspect(&self) -> Vec<InspectMetadata> {
-        let mut result = vec![];
-
-        if let Some((job, metadata)) = self.current.lock().await.clone() {
-            result.push(InspectMetadata {
+    pub async fn inspect(&self) -> (Option<InspectMetadata>, Vec<InspectMetadata>) {
+        let current = self
+            .current
+            .lock()
+            .await
+            .clone()
+            .map(|(job, metadata)| InspectMetadata {
                 job_id: job.id,
                 current: true,
                 track_info: metadata.clone(),
-            })
-        }
+            });
+
+        let mut curr_queue = vec![];
         let queue = self.queue.lock().await;
         for job in queue.iter() {
-            result.push(InspectMetadata {
+            curr_queue.push(InspectMetadata {
                 job_id: job.id,
                 current: false,
                 track_info: job.metadata.clone(),
             });
         }
 
-        result
+        (current, curr_queue)
     }
 
     pub async fn reorder_job(&self, job_id: usize, new_index: usize) -> anyhow::Result<()> {
