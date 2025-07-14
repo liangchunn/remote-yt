@@ -141,11 +141,6 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
           </div>
         </div>
       )}
-      {queue.length > 0 && (
-        <p className="text-sm text-primary/33 text-center">
-          Hint: Drag thumbnail to reorder item
-        </p>
-      )}
       <ClearAllButton show={!!nowPlaying || queue.length > 0} />
     </div>
   );

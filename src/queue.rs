@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 use crate::{
+    history::{History, HistoryEntry},
     job::{Job, JobType},
     meta::InspectMetadata,
     yt_dlp::TrackInfo,
@@ -23,10 +24,11 @@ pub struct QueueManager {
     current: Arc<Mutex<Option<(Job, TrackInfo)>>>,
     clear_requested: Arc<AtomicBool>,
     job_id: Arc<AtomicUsize>,
+    history: Arc<Mutex<History>>,
 }
 
 impl QueueManager {
-    pub fn new() -> Self {
+    pub fn new(history: History) -> Self {
         let notify = Arc::new(Notify::new());
         let notify_ref = notify.clone();
 
@@ -41,6 +43,9 @@ impl QueueManager {
 
         let current = Arc::new(Mutex::new(None));
         let current_ref = current.clone();
+
+        let history = Arc::new(Mutex::new(history));
+        let history_ref = history.clone();
 
         let job_id = Arc::new(AtomicUsize::new(1));
 
@@ -70,6 +75,8 @@ impl QueueManager {
                     *current_lock = Some((job.clone(), job.metadata.clone()));
                 }
 
+                let metadata_clone = job.metadata.clone();
+
                 let mut child = match job.execute().await {
                     Ok(child) => child,
                     Err(e) => {
@@ -89,6 +96,14 @@ impl QueueManager {
                         info!("cancel requested, killing child...");
                         let _ = child.kill().await;
                     }
+                }
+
+                {
+                    let mut lock = history_ref.lock().await;
+                    match lock.insert(metadata_clone).await {
+                        Ok(()) => info!("history updated"),
+                        Err(e) => error!("failed to update history: {e}"),
+                    };
                 }
 
                 {
@@ -118,6 +133,7 @@ impl QueueManager {
             current,
             clear_requested,
             job_id,
+            history,
         }
     }
 
@@ -301,6 +317,16 @@ impl QueueManager {
             running_job.id, job_id
         );
 
+        Ok(())
+    }
+
+    pub async fn get_history(&self) -> Vec<HistoryEntry> {
+        let lock = self.history.lock().await;
+        lock.get_history()
+    }
+    pub async fn remove_history_entry(&self, webpage_url: &str) -> anyhow::Result<()> {
+        let mut lock = self.history.lock().await;
+        lock.remove(webpage_url).await?;
         Ok(())
     }
 }

@@ -19,6 +19,7 @@ use tracing::{Level, error, info};
 
 use crate::{
     format::MinHeight,
+    history::{History, HistoryEntry},
     meta::InspectMetadata,
     queue::QueueManager,
     rpc::{Rpc, RpcCommand, RpcResponse},
@@ -26,6 +27,7 @@ use crate::{
 };
 
 mod format;
+mod history;
 mod job;
 mod meta;
 mod queue;
@@ -42,8 +44,10 @@ struct AppState {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
+    let history = History::new("history.json".into()).await?;
+
     let app_state = Arc::new(AppState {
-        queue: Arc::new(QueueManager::new()),
+        queue: Arc::new(QueueManager::new(history)),
         rpc: Arc::new(Rpc::new("0.0.0.0".into(), 8081, "abc".into())),
     });
 
@@ -61,6 +65,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/execute_command", post(player_commands))
         .route("/api/swap/{id}", post(swap))
         .route("/api/move/{id}/{new_pos}", post(move_to))
+        .route("/api/history", get(get_history))
+        .route("/api/remove_history", post(remove_history_entry))
         .layer(CompressionLayer::new())
         .with_state(app_state)
         .fallback_service(serve_app);
@@ -251,6 +257,32 @@ async fn move_to(
     state.queue.reorder_job(job_id, new_index).await?;
 
     Ok(Json(true))
+}
+
+async fn get_history(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<HistoryEntry>>, AppError> {
+    let mut history_entries = state.queue.get_history().await;
+    history_entries.reverse();
+
+    Ok(Json(history_entries))
+}
+
+#[derive(Deserialize)]
+struct RemoveHistoryPayload {
+    webpage_url: String,
+}
+
+async fn remove_history_entry(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<RemoveHistoryPayload>,
+) -> Result<(), AppError> {
+    state
+        .queue
+        .remove_history_entry(&payload.webpage_url)
+        .await?;
+
+    Ok(())
 }
 
 // Wrapper type for anyhow::Error

@@ -28,6 +28,11 @@ export type TrackInfo = {
   thumbnail: string;
   track_type: "merged" | "split";
   duration: number;
+  webpage_url: string;
+};
+
+export type HistoryEntry = TrackInfo & {
+  inserted_at: number;
 };
 
 export type VideoType = "merged" | "split";

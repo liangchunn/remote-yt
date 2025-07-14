@@ -3,6 +3,7 @@ import { Form } from "./components/form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { VideoType } from "./types/inspect";
 import { toast } from "sonner";
+import { History } from "./components/history";
 
 export default function App() {
   const queryClient = useQueryClient();
@@ -42,6 +43,7 @@ export default function App() {
     <div className="p-4 m-auto max-w-lg pt-4 flex flex-col gap-4 mb-24">
       <Form mutation={mutation} />
       <Queue isMutationPending={mutation.isPending} />
+      <History mutation={mutation} />
     </div>
   );
 }

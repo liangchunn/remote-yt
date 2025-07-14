@@ -6,6 +6,8 @@ import { LoaderCircle } from "lucide-react";
 import { PlayerControls } from "./player-controls";
 import { VideoMeta } from "./video-meta";
 import { PlayerProgress } from "./player-progress";
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 export function NowPlaying({
   item,
@@ -16,6 +18,18 @@ export function NowPlaying({
   isMutationPending: boolean;
   playerState: PlayerState | null;
 }) {
+  const queryClient = useQueryClient();
+
+  const webpageUrl = item?.track_info.webpage_url;
+  // reloads the history when the current track changes
+  // since the history is updated only after a video is currently playing and is ended
+  // either by skipping or played till the end
+  useEffect(() => {
+    queryClient.invalidateQueries({
+      queryKey: ["history"],
+    });
+  }, [webpageUrl, queryClient]);
+
   const info = item?.track_info;
   const isGreyBorder = !info || (playerState && playerState.state === "paused");
   return (

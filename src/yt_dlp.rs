@@ -122,6 +122,7 @@ impl TryFrom<JsonDump> for MergedTrack {
                     track_type: TrackType::Merged,
                     format_id: value.format_id,
                     duration: value.duration,
+                    webpage_url: value.webpage_url,
                 };
 
                 Ok(Self {
@@ -199,6 +200,7 @@ impl TryFrom<JsonDump> for SplitTrack {
                     track_type: TrackType::Split,
                     format_id: value.format_id,
                     duration: value.duration,
+                    webpage_url: value.webpage_url,
                 };
 
                 Ok(SplitTrack {
@@ -214,7 +216,7 @@ impl TryFrom<JsonDump> for SplitTrack {
     }
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 enum TrackType {
     #[serde(rename = "merged")]
     Merged,
@@ -222,7 +224,7 @@ enum TrackType {
     Split,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct TrackInfo {
     pub title: String,
     channel: String,
@@ -235,6 +237,7 @@ pub struct TrackInfo {
     track_type: TrackType,
     pub format_id: String,
     duration: u32,
+    pub webpage_url: String,
 }
 
 pub enum Track<'a> {
@@ -259,6 +262,8 @@ struct JsonDump {
     width: Option<u32>,
     // used for validation only
     format_id: String,
+    // original link of video
+    webpage_url: String,
 }
 
 #[derive(Deserialize)]

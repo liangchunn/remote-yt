@@ -96,3 +96,27 @@ export function useQueueMutations() {
 
   return { reorder, cancel, swap, clear };
 }
+
+export function useRemoveHistoryEntryMutation() {
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: (webpage_url: string) => {
+      return fetch(`/api/remove_history`, {
+        method: "POST",
+        body: JSON.stringify({
+          webpage_url,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["history"],
+      });
+    },
+  });
+  return mutation;
+}
