@@ -178,7 +178,7 @@ function QueueItemInner({ item }: { item: InspectItem | null }) {
   const info = item?.track_info;
   return (
     <div className="flex items-center border rounded-md overflow-hidden gap-2 bg-white select-none">
-      <div className="w-36 self-stretch relative">
+      <div className="w-36 self-stretch relative flex">
         {info ? (
           <img src={info.thumbnail} className="h-full object-cover bg-muted" />
         ) : (

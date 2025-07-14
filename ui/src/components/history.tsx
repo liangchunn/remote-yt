@@ -62,7 +62,7 @@ function HistoryContainer({
   if (data) {
     return data.map((entry) => (
       <div className="flex items-center border rounded-md overflow-hidden gap-2 bg-white select-none">
-        <div className="w-36 self-stretch relative">
+        <div className="w-36 self-stretch relative flex">
           <img src={entry.thumbnail} className="h-full object-cover bg-muted" />
 
           <p className="absolute right-1 bottom-1 text-xs text-white/80 border border-black/20 rounded-sm px-0.5 bg-black/50 ">
