@@ -8,10 +8,9 @@ import {
   FastForward,
   SkipForward,
 } from "lucide-react";
-import { memo } from "react";
 import { Button } from "./ui/button";
 
-function PlayerControlsInner({
+export function PlayerControls({
   jobId,
   playerState,
 }: {
@@ -80,5 +79,3 @@ function PlayerControlsInner({
     </div>
   );
 }
-
-export const PlayerControls = memo(PlayerControlsInner);

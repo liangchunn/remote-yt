@@ -12,9 +12,8 @@ import {
 } from "./ui/alert-dialog";
 import { Button } from "./ui/button";
 import { X } from "lucide-react";
-import { memo } from "react";
 
-function ClearAllButtonInner({ show }: { show: boolean }) {
+export function ClearAllButton({ show }: { show: boolean }) {
   const { clear } = useQueueMutations();
 
   if (!show) {
@@ -49,5 +48,3 @@ function ClearAllButtonInner({ show }: { show: boolean }) {
     </div>
   );
 }
-
-export const ClearAllButton = memo(ClearAllButtonInner);

@@ -1,9 +1,6 @@
 import type { TrackInfo } from "@/types/inspect";
-import { memo } from "react";
 
-export const VideoMeta = memo(VideoMetaInner);
-
-function VideoMetaInner({
+export function VideoMeta({
   acodec,
   vcodec,
   track_type,

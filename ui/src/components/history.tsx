@@ -3,7 +3,6 @@ import type { HistoryEntry, VideoType } from "@/types/inspect";
 import { useQuery, type UseMutationResult } from "@tanstack/react-query";
 import clsx from "clsx";
 import { ChevronDown, ListEnd, Trash } from "lucide-react";
-import { memo } from "react";
 import { useLocalStorage } from "@uidotdev/usehooks";
 import { Button } from "./ui/button";
 import {
@@ -14,7 +13,7 @@ import {
 } from "./ui/dropdown-menu";
 import { useRemoveHistoryEntryMutation } from "@/lib/commands";
 
-function HistoryInner({
+export function History({
   mutation,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -42,8 +41,6 @@ function HistoryInner({
     </div>
   );
 }
-
-export const History = memo(HistoryInner);
 
 function HistoryContainer({
   mutation,

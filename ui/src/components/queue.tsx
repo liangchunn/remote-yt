@@ -12,14 +12,7 @@ import {
   MouseSensor,
   type UniqueIdentifier,
 } from "@dnd-kit/core";
-import {
-  memo,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type PropsWithChildren,
-} from "react";
+import { useMemo, useState, type PropsWithChildren } from "react";
 import { useQueueMutations } from "@/lib/commands";
 import {
   arrayMove,
@@ -44,7 +37,7 @@ import { ClearAllButton } from "./clear-all-button";
 import { formatTime } from "@/lib/format-time";
 
 export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
-  const { data, error, isSuccess } = useQuery({
+  const { data, error } = useQuery({
     queryKey: ["queue"],
     queryFn: async () => {
       const response = await fetch("/api/inspect");
@@ -58,15 +51,19 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
 
   const items = useMemo(() => data?.queue ?? [], [data]);
 
-  const [queue, setQueue] = useState(items);
+  const [localQueue, setLocalQueue] = useState<InspectItem[]>([]);
+  const [itemsId, setItemsId] = useState<string>("");
 
-  useEffect(() => {
-    if (items.length > 0) {
-      setQueue(items);
-    } else {
-      setQueue([]);
-    }
-  }, [items]);
+  // Create a stable ID based on the items to detect actual changes
+  const currentItemsId = items.map((item) => item.job_id).join(",");
+
+  // Sync queue with items from server, but only when items actually change
+  if (currentItemsId !== itemsId) {
+    setItemsId(currentItemsId);
+    setLocalQueue(items);
+  }
+
+  const queue = localQueue;
 
   const sensors = useSensors(
     useSensor(MouseSensor),
@@ -82,9 +79,9 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
     const { active, over } = event;
 
     if (over && active.id !== over.id) {
-      setQueue((items) => {
-        const oldIndex = items.findIndex((id) => active.id === id.job_id);
-        const newIndex = items.findIndex((id) => over.id === id.job_id);
+      setLocalQueue((items) => {
+        const oldIndex = items.findIndex((item) => active.id === item.job_id);
+        const newIndex = items.findIndex((item) => over.id === item.job_id);
 
         reorder(active.id as string, newIndex);
 
@@ -93,14 +90,10 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
     }
   }
 
-  // https://github.com/TanStack/query/discussions/6910
-  const errorRef = useRef(error);
-  if (error || isSuccess) errorRef.current = error;
-
   const nowPlaying = data?.now_playing ?? null;
   const playerState = data?.player ?? null;
 
-  if (errorRef.current) {
+  if (error) {
     return (
       <p className="text-destructive text-center text-lg mt-4">
         Server offline
@@ -171,9 +164,7 @@ function DraggableItem({
   );
 }
 
-const QueueItem = memo(QueueItemInner);
-
-function QueueItemInner({ item }: { item: InspectItem | null }) {
+export function QueueItem({ item }: { item: InspectItem | null }) {
   const { cancel, swap } = useQueueMutations();
   const info = item?.track_info;
   return (

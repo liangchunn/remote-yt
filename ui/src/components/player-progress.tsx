@@ -1,7 +1,7 @@
 import { usePlayerCommandsMutation } from "@/lib/commands";
 import type { PlayerState } from "@/types/inspect";
 import { Volume2, VolumeX } from "lucide-react";
-import { useState, useEffect, useRef, memo } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "./ui/button";
 import { formatTime } from "@/lib/format-time";
 
@@ -10,16 +10,17 @@ export function PlayerProgress({
 }: {
   playerState: PlayerState | null;
 }) {
-  const [visible, setVisible] = useState(false);
+  const [shouldHide, setShouldHide] = useState(!playerState);
 
   useEffect(() => {
-    if (playerState) {
-      setVisible(true);
-    } else {
+    if (!playerState) {
       // Small delay to allow fade-out before hiding
-      const timeout = setTimeout(() => setVisible(false), 300);
+      const timeout = setTimeout(() => setShouldHide(true), 300);
       return () => clearTimeout(timeout);
     }
+    // When playerState exists, clear the hide state immediately
+    const timeout = setTimeout(() => setShouldHide(false), 0);
+    return () => clearTimeout(timeout);
   }, [playerState]);
 
   const [isDragging, setIsDragging] = useState(false);
@@ -78,9 +79,9 @@ export function PlayerProgress({
     <div
       className={`transition-opacity duration-300 ease-in-out ${
         playerState ? "opacity-100" : "opacity-0"
-      } ${visible ? "block" : "hidden"}`}
+      } ${shouldHide ? "hidden" : "block"}`}
     >
-      <div className="absolute bottom-0 left-0 w-full h-24 bg-gradient-to-t from-black/70 to-black/0" />
+      <div className="absolute bottom-0 left-0 w-full h-24 bg-linear-to-t from-black/70 to-black/0" />
       <div className="absolute bottom-6.5 left-0 pl-4">
         <p className="tracking-tight text-sm text-white/80 font-mono">
           <span>{currString}</span>
@@ -118,7 +119,7 @@ export function PlayerProgress({
   );
 }
 
-function MuteButtonInner({ isMuted }: { isMuted: boolean }) {
+export function MuteButton({ isMuted }: { isMuted: boolean }) {
   const { fullVolume, mute } = usePlayerCommandsMutation();
   const handleVolume = () => {
     if (isMuted) {
@@ -138,5 +139,3 @@ function MuteButtonInner({ isMuted }: { isMuted: boolean }) {
     </Button>
   );
 }
-
-const MuteButton = memo(MuteButtonInner);
