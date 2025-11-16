@@ -1,5 +1,5 @@
 import { formatTime, getRelativeTimeString } from "@/lib/format-time";
-import type { HistoryEntry, VideoType } from "@/types/inspect";
+import type { HistoryEntry, JobType } from "@/types/inspect";
 import { useQuery, type UseMutationResult } from "@tanstack/react-query";
 import clsx from "clsx";
 import { ChevronDown, ListEnd, Trash } from "lucide-react";
@@ -17,7 +17,7 @@ export function History({
   mutation,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  mutation: UseMutationResult<any, Error, [VideoType, string, number], unknown>;
+  mutation: UseMutationResult<any, Error, [JobType, string, number], unknown>;
 }) {
   const [open, setOpen] = useLocalStorage("historyOpen", false);
   return (
@@ -46,7 +46,7 @@ function HistoryContainer({
   mutation,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  mutation: UseMutationResult<any, Error, [VideoType, string, number], unknown>;
+  mutation: UseMutationResult<any, Error, [JobType, string, number], unknown>;
 }) {
   const { data } = useQuery({
     queryKey: ["history"],
@@ -85,9 +85,8 @@ function HistoryContainer({
             <DropdownMenuContent align="end">
               <DropdownMenuItem
                 onClick={() =>
-                  // TODO: always queue split and used height
                   mutation.mutate([
-                    "split",
+                    entry.job_type,
                     entry.webpage_url,
                     entry.height ?? 720,
                   ])

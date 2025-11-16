@@ -5,8 +5,12 @@ use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use tokio::process::Command;
 use tracing::{error, info};
+use url::Url;
 
-use crate::format::{Format, MinHeight};
+use crate::{
+    config::{Config, Provider},
+    format::{Format, MinHeight},
+};
 
 pub struct Video;
 
@@ -15,31 +19,100 @@ impl Video {
         link: &str,
         format: Format,
         min_height: MinHeight,
+        config: &Config,
     ) -> anyhow::Result<JsonDump> {
-        let output = Command::new("yt-dlp")
+        let format = format.get_format_string(min_height);
+        info!(
+            "yt-dlp -f \"{}\" --skip-download --dump-json \"{}\"",
+            format, link
+        );
+        let output = Command::new(&config.yt_dlp_path)
+            // .arg("--impersonate")
+            // .arg("Chrome")
             .arg("-f")
-            .arg(format.get_format_string(min_height))
+            .arg(format.clone())
             .arg("--skip-download")
             .arg("--dump-json")
             .arg(link)
             .output()
-            .await?
-            .stdout;
-        let json = String::from_utf8(output)?.trim().to_string();
+            .await?;
+        let stdout = output.stdout;
+        let stderr = output.stderr;
+        if stdout.len() == 0 {
+            let err_msg = String::from_utf8(stderr)?;
+            error!("yt-dlp error: {}", err_msg);
+            return Err(anyhow::anyhow!("yt-dlp failed: {}", err_msg));
+        }
+        let json = String::from_utf8(stdout)?.trim().to_string();
         let dump = serde_json::from_str::<JsonDump>(&json)?;
         Ok(dump)
+    }
+
+    pub async fn get_track<'a>(url: &str, config: &Config) -> anyhow::Result<Track<'a>> {
+        let parsed_url = Url::parse(url)?;
+        let host = parsed_url
+            .host_str()
+            .ok_or_else(|| anyhow::anyhow!("invalid url"))?;
+
+        let provider = Self::find_provider_for_host(host, config)
+            .ok_or_else(|| anyhow::anyhow!("provider not found for host: {}", host))?;
+
+        let output = Command::new(&config.yt_dlp_path)
+            .args(&provider.args)
+            .arg("--skip-download")
+            .arg("--dump-json")
+            .arg(url)
+            .output()
+            .await?;
+
+        let stdout = output.stdout;
+        let stderr = output.stderr;
+        if stdout.len() == 0 {
+            let err_msg = String::from_utf8(stderr)?;
+            error!("yt-dlp error: {}", err_msg);
+            return Err(anyhow::anyhow!("yt-dlp failed: {}", err_msg));
+        }
+        let json = String::from_utf8(stdout)?.trim().to_string();
+        let dump = serde_json::from_str::<JsonDump>(&json)?;
+
+        let track = match provider.r#type {
+            TrackType::Merged => {
+                let json: MergedTrack = dump.try_into()?;
+                Track::Merged(json)
+            }
+            TrackType::Split => {
+                let json: SplitTrack = dump.try_into()?;
+                Track::Split(json)
+            }
+        };
+
+        Ok(track)
+    }
+
+    fn find_provider_for_host<'a>(host: &str, config: &'a Config) -> Option<&'a Provider> {
+        for key in config.providers.keys() {
+            if host.contains(key) {
+                return config.providers.get(key);
+            }
+        }
+        None
     }
 
     pub async fn get_merged_track(
         link: &str,
         min_height: MinHeight,
+        config: &Config,
     ) -> anyhow::Result<MergedTrack> {
-        let json = Self::get_json(link, Format::Merged, min_height).await?;
+        let json = Self::get_json(link, Format::Merged, min_height, config).await?;
         json.try_into()
     }
 
-    pub async fn get_split_track(link: &str, min_height: MinHeight) -> anyhow::Result<SplitTrack> {
-        let json = Self::get_json(link, Format::Split, min_height).await?;
+    pub async fn get_split_track(
+        link: &str,
+        min_height: MinHeight,
+        config: &Config,
+    ) -> anyhow::Result<SplitTrack> {
+        let json = Self::get_json(link, Format::Split, min_height, config).await?;
         json.try_into()
     }
 
@@ -49,7 +122,7 @@ impl Video {
         min_height: MinHeight,
     ) -> anyhow::Result<()> {
         info!("starting download {link}");
-        let exit_staus = Command::new("yt-dlp")
+        let exit_staus = Command::new("/Users/liangchun/dev/ex/yt-dlp/yt-dlp.sh")
             .arg("-f")
             .arg(Format::Split.get_format_string(min_height))
             .arg("--retries")
@@ -112,16 +185,16 @@ impl TryFrom<JsonDump> for MergedTrack {
             Some(merged_url) => {
                 let track_info = TrackInfo {
                     title: value.title,
-                    channel: value.channel,
-                    uploader_id: value.uploader_id,
-                    acodec: value.acodec,
-                    vcodec: value.vcodec,
+                    channel: value.channel.or(value.uploader).unwrap_or_default(),
+                    uploader_id: value.uploader_id.unwrap_or_default(),
+                    acodec: value.acodec.unwrap_or_default(),
+                    vcodec: value.vcodec.unwrap_or_default(),
                     height: value.height,
                     width: value.width,
                     thumbnail: value.thumbnail,
                     track_type: TrackType::Merged,
                     format_id: value.format_id,
-                    duration: value.duration,
+                    duration: value.duration.unwrap_or_default(),
                     webpage_url: value.webpage_url,
                 };
 
@@ -190,8 +263,8 @@ impl TryFrom<JsonDump> for SplitTrack {
 
                 let track_info = TrackInfo {
                     title: value.title,
-                    channel: value.channel,
-                    uploader_id: value.uploader_id,
+                    channel: value.channel.or(value.uploader).unwrap_or_default(),
+                    uploader_id: value.uploader_id.unwrap_or_default(),
                     acodec: acodec.unwrap_or_default(),
                     vcodec: vcodec.unwrap_or_default(),
                     height,
@@ -199,7 +272,7 @@ impl TryFrom<JsonDump> for SplitTrack {
                     thumbnail: value.thumbnail,
                     track_type: TrackType::Split,
                     format_id: value.format_id,
-                    duration: value.duration,
+                    duration: value.duration.unwrap_or_default(),
                     webpage_url: value.webpage_url,
                 };
 
@@ -217,7 +290,7 @@ impl TryFrom<JsonDump> for SplitTrack {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
-enum TrackType {
+pub enum TrackType {
     #[serde(rename = "merged")]
     Merged,
     #[serde(rename = "split")]
@@ -246,18 +319,40 @@ pub enum Track<'a> {
     File(&'a PathBuf),
 }
 
+impl<'a> Track<'a> {
+    pub fn track_info(&self) -> &TrackInfo {
+        match self {
+            Track::Merged(track) => &track.track_info,
+            Track::Split(track) => &track.track_info,
+            Track::File(_) => panic!("file track has no track info"),
+        }
+    }
+    pub fn get_title(&self) -> String {
+        match self {
+            Track::Merged(track) => track.track_info.title.clone(),
+            Track::Split(track) => track.track_info.title.clone(),
+            Track::File(path) => path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct JsonDump {
     title: String,
     requested_formats: Option<Vec<RequestedFormat>>,
     url: Option<String>,
-    channel: String,
-    uploader_id: String,
+    channel: Option<String>,
+    uploader: Option<String>,
+    uploader_id: Option<String>,
     thumbnail: String,
-    duration: u32,
+    duration: Option<u32>,
     // used for merged format
-    acodec: String,
-    vcodec: String,
+    acodec: Option<String>,
+    vcodec: Option<String>,
     height: Option<u32>,
     width: Option<u32>,
     // used for validation only
@@ -276,5 +371,3 @@ struct RequestedFormat {
     height: Option<u32>,
     width: Option<u32>,
 }
-
-//yt-dlp -f "ba+bv[height<=720]" --skip-download --dump-json "https://www.youtube.com/watch?v=GNXNwT65ymg" | jq > out.json

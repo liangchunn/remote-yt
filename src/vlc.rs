@@ -1,6 +1,10 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, process::Stdio};
 
-use tokio::process::{Child, Command};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    process::{Child, Command},
+};
+use tracing::info;
 
 use crate::yt_dlp::Track;
 
@@ -8,23 +12,10 @@ pub struct VlcClient {
     binary_path: PathBuf,
 }
 
-impl Default for VlcClient {
-    fn default() -> Self {
-        let binary_path = if cfg!(target_os = "macos") {
-            "/Applications/VLC.app/Contents/MacOS/VLC".into()
-        } else if cfg!(target_os = "linux") {
-            "vlc".into()
-        } else {
-            unimplemented!()
-        };
+impl VlcClient {
+    pub fn new(binary_path: PathBuf) -> Self {
         Self { binary_path }
     }
-}
-
-impl VlcClient {
-    // pub fn with_binary_path(binary_path: PathBuf) -> Self {
-    //     Self { binary_path }
-    // }
     pub async fn oneshot<'a>(&self, track: Track<'a>, title: &str) -> anyhow::Result<Child> {
         let binary_path = self.binary_path.clone();
         let mut child = Command::new(binary_path);
@@ -33,7 +24,7 @@ impl VlcClient {
             .arg("--fullscreen")
             .arg("--extraintf=http")
             .arg("--http-password=abc")
-            .arg("--http-host=0.0.0.0")
+            .arg("--http-host=127.0.0.1")
             .arg("--http-port=8081");
 
         match track {
@@ -52,43 +43,43 @@ impl VlcClient {
 
         Ok(child.spawn()?)
     }
-    // pub async fn launch_persistent_with_http_api(&self) -> anyhow::Result<()> {
-    //     let binary_path = self.binary_path.clone();
-    //     tokio::spawn(async move {
-    //         let mut cmd = Command::new(binary_path);
-    //         let cmd = cmd
-    //             .arg("--extraintf=http")
-    //             .arg("--http-password=abc")
-    //             .arg("--http-host=0.0.0.0")
-    //             .arg("--http-port=8081");
+    pub async fn launch_persistent_with_http_api(&self) -> anyhow::Result<()> {
+        let binary_path = self.binary_path.clone();
+        tokio::spawn(async move {
+            let mut cmd = Command::new(binary_path);
+            let cmd = cmd
+                .arg("--extraintf=http")
+                .arg("--http-password=abc")
+                .arg("--http-host=0.0.0.0")
+                .arg("--http-port=8081");
 
-    //         cmd.stdout(Stdio::piped());
-    //         cmd.stderr(Stdio::piped());
+            cmd.stdout(Stdio::piped());
+            cmd.stderr(Stdio::piped());
 
-    //         let mut child = cmd.spawn().expect("failed to spawn vlc");
+            let mut child = cmd.spawn().expect("failed to spawn vlc");
 
-    //         let stdout = child
-    //             .stdout
-    //             .take()
-    //             .expect("child did not have a handle to stdout");
-    //         let stderr = child
-    //             .stderr
-    //             .take()
-    //             .expect("child did not have a handle to stderr");
+            let stdout = child
+                .stdout
+                .take()
+                .expect("child did not have a handle to stdout");
+            let stderr = child
+                .stderr
+                .take()
+                .expect("child did not have a handle to stderr");
 
-    //         tokio::spawn(async move {
-    //             let mut lines = BufReader::new(stdout).lines();
-    //             while let Ok(Some(line)) = lines.next_line().await {
-    //                 info!("[vlc::stdout] {line}")
-    //             }
-    //         });
-    //         tokio::spawn(async move {
-    //             let mut lines = BufReader::new(stderr).lines();
-    //             while let Ok(Some(line)) = lines.next_line().await {
-    //                 info!("[vlc::stderr] {line}")
-    //             }
-    //         });
-    //     });
-    //     Ok(())
-    // }
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stdout).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    info!("[vlc::stdout] {line}")
+                }
+            });
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    info!("[vlc::stderr] {line}")
+                }
+            });
+        });
+        Ok(())
+    }
 }

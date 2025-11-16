@@ -6,7 +6,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tokio::fs::{read_to_string, write};
 
-use crate::yt_dlp::TrackInfo;
+use crate::{job::JobTypeString, yt_dlp::TrackInfo};
 
 pub struct History {
     history_file: PathBuf,
@@ -24,9 +24,10 @@ pub struct HistoryEntry {
     track_info: TrackInfo,
     #[serde(flatten)]
     extra_info: ExtraInfo,
+    job_type: JobTypeString,
 }
 
-const MAX_HISTORY_LEN: usize = 20;
+const MAX_HISTORY_LEN: usize = 100;
 
 impl History {
     pub async fn new(history_file: PathBuf) -> anyhow::Result<Self> {
@@ -50,7 +51,11 @@ impl History {
         write(&self.history_file, serde_json::to_string(&self.contents)?).await?;
         Ok(())
     }
-    pub async fn insert(&mut self, track_info: TrackInfo) -> anyhow::Result<()> {
+    pub async fn insert(
+        &mut self,
+        track_info: TrackInfo,
+        job_type: JobTypeString,
+    ) -> anyhow::Result<()> {
         let inserted_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -70,6 +75,7 @@ impl History {
         self.contents.push(HistoryEntry {
             track_info,
             extra_info,
+            job_type,
         });
 
         // truncate 20 items

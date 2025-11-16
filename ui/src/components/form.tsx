@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import type { VideoType } from "@/types/inspect";
+import type { JobType } from "@/types/inspect";
 
 const QUALITY_TO_MIN_HEIGHT = {
   sd: 480,
@@ -18,13 +18,14 @@ const QUALITY_TO_MIN_HEIGHT = {
   sd_s: 480,
   hd_s: 720,
   fhd_s: 1080,
+  config: 0,
 };
 
 export function Form({
   mutation,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  mutation: UseMutationResult<any, Error, [VideoType, string, number], unknown>;
+  mutation: UseMutationResult<any, Error, [JobType, string, number], unknown>;
 }) {
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -37,7 +38,11 @@ export function Form({
     const min_height = QUALITY_TO_MIN_HEIGHT[quality];
     input.value = "";
     mutation.mutate([
-      quality.endsWith("_s") ? "split" : "merged",
+      quality === "config"
+        ? "Queue"
+        : quality.endsWith("_s")
+        ? "QueueSplit"
+        : "QueueMerged",
       url,
       min_height,
     ]);
@@ -45,11 +50,12 @@ export function Form({
   return (
     <form className="flex gap-2" onSubmit={handleSubmit}>
       <Input id="url" placeholder="Insert URL..." />
-      <Select defaultValue="hd_s" name="quality">
+      <Select defaultValue="config" name="quality">
         <SelectTrigger className="w-[130px]">
           <SelectValue placeholder="Theme" />
         </SelectTrigger>
         <SelectContent className="min-w-0">
+          <SelectItem value="config">Use Config</SelectItem>
           <SelectItem value="sd_s">480p</SelectItem>
           <SelectItem value="hd_s">720p</SelectItem>
           <SelectItem value="fhd_s">1080p</SelectItem>

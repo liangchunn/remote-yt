@@ -1,24 +1,29 @@
 import { Queue } from "./components/queue";
 import { Form } from "./components/form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { VideoType } from "./types/inspect";
+import type { JobType } from "./types/inspect";
 import { toast } from "sonner";
 import { History } from "./components/history";
+
+const API_MAP: Record<JobType, string> = {
+  QueueMerged: "/api/queue_merged",
+  QueueSplit: "/api/queue_split",
+  Queue: "/api/queue_config",
+};
 
 export default function App() {
   const queryClient = useQueryClient();
   const mutation = useMutation({
-    mutationFn: async ([video_type, url, min_height]: [
-      VideoType,
+    mutationFn: async ([job_type, url, min_height]: [
+      JobType,
       string,
       number
     ]) => {
-      const fragment = video_type === "merged" ? "queue_merged" : "queue_split";
-      const resp = await fetch(`/api/${fragment}`, {
+      const resp = await fetch(API_MAP[job_type], {
         method: "POST",
         body: JSON.stringify({
           url,
-          height: min_height,
+          height: job_type === "Queue" ? undefined : min_height,
         }),
         headers: {
           "Content-Type": "application/json",

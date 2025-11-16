@@ -12,7 +12,7 @@ use tracing::{error, info};
 
 use crate::{
     history::{History, HistoryEntry},
-    job::{Job, JobType},
+    job::{Job, JobType, JobTypeString},
     meta::InspectMetadata,
     yt_dlp::TrackInfo,
 };
@@ -21,7 +21,6 @@ pub struct QueueManager {
     queue: Arc<Mutex<VecDeque<Job>>>,
     notify: Arc<Notify>,
     running: Arc<Mutex<Option<(Job, CancellationToken)>>>,
-    current: Arc<Mutex<Option<(Job, TrackInfo)>>>,
     clear_requested: Arc<AtomicBool>,
     job_id: Arc<AtomicUsize>,
     history: Arc<Mutex<History>>,
@@ -40,9 +39,6 @@ impl QueueManager {
 
         let clear_requested = Arc::new(AtomicBool::new(false));
         let clear_ref = clear_requested.clone();
-
-        let current = Arc::new(Mutex::new(None));
-        let current_ref = current.clone();
 
         let history = Arc::new(Mutex::new(history));
         let history_ref = history.clone();
@@ -63,16 +59,14 @@ impl QueueManager {
                     }
                 };
 
+                let job_type: JobTypeString = (&job.job_type).into();
+
                 info!("starting job...");
 
                 let cancel_token = CancellationToken::new();
                 {
                     let mut lock = running_ref.lock().await;
                     *lock = Some((job.clone(), cancel_token.clone()));
-                }
-                {
-                    let mut current_lock = current_ref.lock().await;
-                    *current_lock = Some((job.clone(), job.metadata.clone()));
                 }
 
                 let metadata_clone = job.metadata.clone();
@@ -81,6 +75,11 @@ impl QueueManager {
                     Ok(child) => child,
                     Err(e) => {
                         error!("failed to start process: {e}");
+                        // Clear state before continuing to next job
+                        {
+                            let mut lock = running_ref.lock().await;
+                            *lock = None;
+                        }
                         continue;
                     }
                 };
@@ -100,7 +99,7 @@ impl QueueManager {
 
                 {
                     let mut lock = history_ref.lock().await;
-                    match lock.insert(metadata_clone).await {
+                    match lock.insert(metadata_clone, job_type).await {
                         Ok(()) => info!("history updated"),
                         Err(e) => error!("failed to update history: {e}"),
                     };
@@ -109,10 +108,6 @@ impl QueueManager {
                 {
                     let mut lock = running_ref.lock().await;
                     *lock = None;
-                }
-                {
-                    let mut current_lock = current_ref.lock().await;
-                    *current_lock = None;
                 }
 
                 if clear_ref.load(Ordering::SeqCst) {
@@ -130,7 +125,6 @@ impl QueueManager {
             queue,
             notify,
             running,
-            current,
             clear_requested,
             job_id,
             history,
@@ -221,14 +215,14 @@ impl QueueManager {
 
     pub async fn inspect(&self) -> (Option<InspectMetadata>, Vec<InspectMetadata>) {
         let current = self
-            .current
+            .running
             .lock()
             .await
             .clone()
-            .map(|(job, metadata)| InspectMetadata {
+            .map(|(job, _)| InspectMetadata {
                 job_id: job.id,
                 current: true,
-                track_info: metadata.clone(),
+                track_info: job.metadata.clone(),
             });
 
         let mut curr_queue = vec![];

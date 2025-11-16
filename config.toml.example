@@ -1,0 +1,7 @@
+vlc_path = "vlc
+yt_dlp_path = "yt-dlp"
+
+[youtube]
+args = []
+format = "bv[vcodec^=avc1][height<=720]+ba[ext=m4a]/ba+bv[height<=720]"
+type = "split"

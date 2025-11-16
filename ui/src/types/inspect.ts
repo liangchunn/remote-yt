@@ -29,10 +29,11 @@ export type TrackInfo = {
   track_type: "merged" | "split";
   duration: number;
   webpage_url: string;
+  job_type: JobType;
 };
 
 export type HistoryEntry = TrackInfo & {
   inserted_at: number;
 };
 
-export type VideoType = "merged" | "split";
+export type JobType = "QueueMerged" | "QueueSplit" | "Queue";

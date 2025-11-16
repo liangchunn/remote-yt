@@ -26,6 +26,7 @@ use crate::{
     yt_dlp::Video,
 };
 
+pub mod config;
 mod format;
 mod history;
 mod job;
@@ -38,6 +39,7 @@ mod yt_dlp;
 struct AppState {
     queue: Arc<QueueManager>,
     rpc: Arc<Rpc>,
+    config: config::Config,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -45,16 +47,19 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
     let history = History::new("history.json".into()).await?;
+    let config = config::parse_config("config.toml")?;
 
     let app_state = Arc::new(AppState {
         queue: Arc::new(QueueManager::new(history)),
-        rpc: Arc::new(Rpc::new("0.0.0.0".into(), 8081, "abc".into())),
+        rpc: Arc::new(Rpc::new("127.0.0.1".into(), 8081, "abc".into())),
+        config,
     });
 
     let serve_app =
         ServeDir::new("ui/dist").not_found_service(ServeFile::new("ui/dist/index.html"));
 
     let app = Router::new()
+        .route("/api/queue_config", post(queue_config_handler))
         .route("/api/queue_merged", post(queue_merged_handler))
         .route("/api/queue_split", post(queue_split_handler))
         .route("/api/queue_file", post(queue_file_handler))
@@ -88,6 +93,31 @@ struct QueueResponse {
     job_id: usize,
 }
 
+async fn queue_config_handler(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<QueuePayload>,
+) -> Result<Json<QueueResponse>, AppError> {
+    let url = payload.url.clone();
+    info!("queueing {url}...");
+    let config = &state.config;
+    let track = Video::get_track(&url, &config).await?;
+
+    let job_id = state
+        .queue
+        .submit(
+            job::JobType::Queue {
+                url: payload.url,
+                config: config.clone(),
+            },
+            track.track_info().to_owned(),
+        )
+        .await;
+
+    info!("queued {url} with job_id {job_id}");
+
+    Ok(Json(QueueResponse { job_id }))
+}
+
 async fn queue_merged_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<QueuePayload>,
@@ -95,8 +125,12 @@ async fn queue_merged_handler(
     let url = payload.url.clone();
     info!("queueing {url}...");
 
-    let merged_track =
-        Video::get_merged_track(&payload.url, MinHeight(payload.height.unwrap_or(480))).await?;
+    let merged_track = Video::get_merged_track(
+        &payload.url,
+        MinHeight(payload.height.unwrap_or(480)),
+        &state.config,
+    )
+    .await?;
 
     let format_id = merged_track.track_info.format_id.clone();
     let track_info = merged_track.track_info;
@@ -108,6 +142,7 @@ async fn queue_merged_handler(
                 url: payload.url,
                 height: payload.height,
                 format_id,
+                config: state.config.clone(),
             },
             track_info,
         )
@@ -125,8 +160,12 @@ async fn queue_split_handler(
     let url = payload.url.clone();
     info!("queueing {url}...");
 
-    let split_track =
-        Video::get_split_track(&payload.url, MinHeight(payload.height.unwrap_or(480))).await?;
+    let split_track = Video::get_split_track(
+        &payload.url,
+        MinHeight(payload.height.unwrap_or(480)),
+        &state.config,
+    )
+    .await?;
 
     let format_id = split_track.track_info.format_id.clone();
     let track_info = split_track.track_info;
@@ -138,6 +177,7 @@ async fn queue_split_handler(
                 url: payload.url,
                 height: payload.height,
                 format_id,
+                config: state.config.clone(),
             },
             track_info,
         )
@@ -156,7 +196,8 @@ async fn queue_file_handler(
     info!("queueing {url}...");
 
     let min_height = payload.height.unwrap_or(480);
-    let merged_track = Video::get_merged_track(&payload.url, MinHeight(min_height)).await?;
+    let merged_track =
+        Video::get_merged_track(&payload.url, MinHeight(min_height), &state.config).await?;
 
     let track_info = merged_track.track_info;
     let title = track_info.title.clone();
@@ -172,6 +213,7 @@ async fn queue_file_handler(
             job::JobType::QueueFile {
                 title,
                 file: temp_file_clone,
+                config: state.config.clone(),
             },
             track_info,
         )
@@ -310,24 +352,3 @@ impl IntoResponse for AppError {
             .into_response()
     }
 }
-
-// let url = Video::get_merged_url(
-//         "https://www.youtube.com/watch?v=GNXNwT65ymg",
-//         MinHeight::default(),
-//     )
-//     .await?;
-
-//     println!("{}", url.merged_url);
-
-//     let url = Video::get_split_urls(
-//         "https://www.youtube.com/watch?v=GNXNwT65ymg",
-//         MinHeight::default(),
-//     )
-//     .await?;
-
-//     println!("{}", url.video_url);
-//     println!("{}", url.audio_url);
-
-// VlcClient::default().launch().await?;
-
-// sleep(Duration::from_secs(100)).await;
