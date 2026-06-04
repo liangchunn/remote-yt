@@ -263,7 +263,9 @@ async fn inspect_handler(
     let player = match player {
         Ok(v) => Some(v),
         Err(e) => {
-            error!("rpc error: {e}");
+            if now_playing.is_some() {
+                error!("rpc error: {e}");
+            }
             None
         }
     };

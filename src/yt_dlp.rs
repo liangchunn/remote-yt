@@ -57,6 +57,9 @@ impl Video {
         let provider = Self::find_provider_for_host(host, config)
             .ok_or_else(|| anyhow::anyhow!("provider not found for host: {}", host))?;
 
+        info!("{:#?}", provider.args);
+        info!("{url}");
+
         let output = Command::new(&config.yt_dlp_path)
             .args(&provider.args)
             .arg("--skip-download")
