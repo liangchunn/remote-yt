@@ -1,5 +1,15 @@
-import { type FormEvent } from "react";
+import { type FormEvent, useState } from "react";
 import { Button } from "./ui/button";
+import { ClipboardPasteIcon } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "./ui/dialog";
 import { Input } from "./ui/input";
 import { type UseMutationResult } from "@tanstack/react-query";
 import {
@@ -27,43 +37,96 @@ export function Form({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mutation: UseMutationResult<any, Error, [JobType, string, number], unknown>;
 }) {
+  const [open, setOpen] = useState(false);
+  const [url, setUrl] = useState("");
+  const [quality, setQuality] =
+    useState<keyof typeof QUALITY_TO_MIN_HEIGHT>("config");
+
+  const pasteUrl = async () => {
+    const text = await navigator.clipboard.readText();
+    setUrl(text);
+  };
+
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const input = e.currentTarget.elements.namedItem("url") as HTMLInputElement;
-    const url = input.value;
-    const quality_input = e.currentTarget.elements.namedItem(
-      "quality"
-    ) as HTMLSelectElement;
-    const quality = quality_input.value as keyof typeof QUALITY_TO_MIN_HEIGHT;
     const min_height = QUALITY_TO_MIN_HEIGHT[quality];
-    input.value = "";
+    setUrl("");
+    setOpen(false);
     mutation.mutate([
       quality === "config"
         ? "Queue"
         : quality.endsWith("_s")
-        ? "QueueSplit"
-        : "QueueMerged",
+          ? "QueueSplit"
+          : "QueueMerged",
       url,
       min_height,
     ]);
   };
   return (
-    <form className="flex gap-2" onSubmit={handleSubmit}>
-      <Input id="url" placeholder="Insert URL..." />
-      <Select defaultValue="config" name="quality">
-        <SelectTrigger className="w-[130px]">
-          <SelectValue placeholder="Theme" />
-        </SelectTrigger>
-        <SelectContent className="min-w-0">
-          <SelectItem value="config">Use Config</SelectItem>
-          <SelectItem value="sd_s">480p</SelectItem>
-          <SelectItem value="hd_s">720p</SelectItem>
-          <SelectItem value="fhd_s">1080p</SelectItem>
-          <SelectItem value="sd">480m</SelectItem>
-        </SelectContent>
-      </Select>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button>Queue...</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Queue Media</DialogTitle>
+          <DialogDescription>
+            Add a URL to the playback queue.
+          </DialogDescription>
+        </DialogHeader>
 
-      <Button>Queue</Button>
-    </form>
+        <form className="grid gap-4" onSubmit={handleSubmit}>
+          <div className="grid gap-2">
+            <label htmlFor="url" className="text-sm font-medium">
+              URL
+            </label>
+            <div className="flex gap-2">
+              <Input
+                id="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="Insert URL..."
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={pasteUrl}
+                aria-label="Paste URL from clipboard"
+              >
+                <ClipboardPasteIcon />
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <label htmlFor="quality" className="text-sm font-medium">
+              Media Type
+            </label>
+            <Select
+              value={quality}
+              onValueChange={(value) =>
+                setQuality(value as keyof typeof QUALITY_TO_MIN_HEIGHT)
+              }
+            >
+              <SelectTrigger id="quality" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="config">Auto</SelectItem>
+                <SelectItem value="sd_s">480p</SelectItem>
+                <SelectItem value="hd_s">720p</SelectItem>
+                <SelectItem value="fhd_s">1080p</SelectItem>
+                <SelectItem value="sd">480m</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <DialogFooter>
+            <Button type="submit">Queue</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

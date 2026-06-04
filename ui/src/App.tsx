@@ -17,7 +17,7 @@ export default function App() {
     mutationFn: async ([job_type, url, min_height]: [
       JobType,
       string,
-      number
+      number,
     ]) => {
       const resp = await fetch(API_MAP[job_type], {
         method: "POST",
@@ -46,7 +46,9 @@ export default function App() {
   });
   return (
     <div className="p-4 m-auto max-w-lg pt-4 flex flex-col gap-4 mb-24">
-      <Form mutation={mutation} />
+      <div className="flex justify-end">
+        <Form mutation={mutation} />
+      </div>
       <Queue isMutationPending={mutation.isPending} />
       <History mutation={mutation} />
     </div>
