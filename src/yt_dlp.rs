@@ -64,6 +64,8 @@ impl Video {
 
         let mut args = provider.args.iter().map(OsString::from).collect::<Vec<_>>();
         args.extend([
+            OsString::from("-f"),
+            OsString::from(provider.format.as_str()),
             OsString::from("--skip-download"),
             OsString::from("--dump-json"),
             OsString::from(url),
