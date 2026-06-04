@@ -4,6 +4,7 @@ type Command =
   | "SeekForward"
   | "SeekRewind"
   | { SeekTo: number }
+  | { SetVolume: number }
   | "TogglePause"
   | "Mute"
   | "FullVolume";
@@ -35,6 +36,10 @@ export function usePlayerCommandsMutation() {
     });
   const mute = () => commandMutation.mutate("Mute");
   const fullVolume = () => commandMutation.mutate("FullVolume");
+  const setVolume = (percent: number) =>
+    commandMutation.mutate({
+      SetVolume: percent,
+    });
 
   return {
     seekForward,
@@ -43,6 +48,7 @@ export function usePlayerCommandsMutation() {
     seekTo,
     mute,
     fullVolume,
+    setVolume,
   };
 }
 

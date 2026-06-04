@@ -1,9 +1,13 @@
 @import 'tailwindcss';
 @import "tw-animate-css";
+@import "@fontsource-variable/geist/wght.css";
+@import "@fontsource/commit-mono";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --font-sans: "Geist Variable", sans-serif;
+  --font-mono: "Commit Mono", sans-serif;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

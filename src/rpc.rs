@@ -33,6 +33,7 @@ pub enum RpcCommand {
     TogglePause,
     Mute,
     FullVolume,
+    SetVolume(u8),
 }
 
 impl RpcCommand {
@@ -62,6 +63,12 @@ impl RpcCommand {
                 map.insert("command", "volume".into());
                 map.insert("val", "255".to_string());
             }
+            RpcCommand::SetVolume(percent) => {
+                let percent = (*percent).min(100) as u16;
+                let vlc_volume = (percent * 255 + 50) / 100;
+                map.insert("command", "volume".into());
+                map.insert("val", vlc_volume.to_string());
+            }
         };
 
         serde_urlencoded::to_string(map).unwrap()
@@ -90,14 +97,13 @@ impl Rpc {
         Ok(json)
     }
 
-    pub async fn execute_command(&self, command: RpcCommand) -> anyhow::Result<RpcResponse> {
-        let response = self
-            .client
+    pub async fn execute_command(&self, command: RpcCommand) -> anyhow::Result<()> {
+        self.client
             .get(format!("{}?{}", self.url, command.to_query_string()))
             .basic_auth("", Some(&self.password))
             .send()
-            .await?;
-        let json = response.json::<RpcResponse>().await?;
-        Ok(json)
+            .await?
+            .error_for_status()?;
+        Ok(())
     }
 }
