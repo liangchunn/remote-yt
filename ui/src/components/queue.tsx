@@ -35,6 +35,7 @@ import { VideoMeta } from "./video-meta";
 import { NowPlaying } from "./now-playing";
 import { ClearAllButton } from "./clear-all-button";
 import { formatTime } from "@/lib/format-time";
+import { SafeImage } from "./safe-image";
 
 export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
   const { data, error } = useQuery({
@@ -72,7 +73,7 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
         delay: 250,
         tolerance: 5,
       },
-    })
+    }),
   );
   const { reorder } = useQueueMutations();
   function handleDragEnd(event: DragEndEvent) {
@@ -169,9 +170,12 @@ export function QueueItem({ item }: { item: InspectItem | null }) {
   const info = item?.track_info;
   return (
     <div className="flex items-center border rounded-md overflow-hidden gap-2 bg-white select-none">
-      <div className="w-36 self-stretch relative flex">
+      <div className="w-36 min-h-20 self-stretch relative flex">
         {info ? (
-          <img src={info.thumbnail} className="h-full object-cover bg-muted" />
+          <SafeImage
+            src={info.thumbnail}
+            className="h-full object-cover bg-muted"
+          />
         ) : (
           <div className="w-36 object-cover bg-muted/95 ">
             <div className="aspect-video flex items-center justify-center">
@@ -206,16 +210,18 @@ export function QueueItem({ item }: { item: InspectItem | null }) {
       </div>
       <div className="self-start">
         <DropdownMenu>
-          <DropdownMenuTrigger>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8"
-              disabled={!item}
-            >
-              <ChevronDown />
-            </Button>
-          </DropdownMenuTrigger>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                disabled={!item}
+              >
+                <ChevronDown />
+              </Button>
+            }
+          />
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => item && swap(item.job_id)}>
               <Play className="mr-1" />

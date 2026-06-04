@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { Button } from "./ui/button";
-import { ClipboardPasteIcon } from "lucide-react";
+import { ClipboardPasteIcon, PlusIcon } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -30,6 +30,17 @@ const QUALITY_TO_MIN_HEIGHT = {
   fhd_s: 1080,
   config: 0,
 };
+
+const QUALITY_ITEMS = [
+  { value: "config", label: "Auto" },
+  { value: "sd_s", label: "480p" },
+  { value: "hd_s", label: "720p" },
+  { value: "fhd_s", label: "1080p" },
+  { value: "sd", label: "480m" },
+] satisfies ReadonlyArray<{
+  value: keyof typeof QUALITY_TO_MIN_HEIGHT;
+  label: string;
+}>;
 
 export function Form({
   mutation,
@@ -64,9 +75,13 @@ export function Form({
   };
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button>Queue...</Button>
-      </DialogTrigger>
+      <DialogTrigger
+        render={
+          <Button>
+            <PlusIcon /> Queue...
+          </Button>
+        }
+      />
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Queue Media</DialogTitle>
@@ -104,6 +119,7 @@ export function Form({
               Media Type
             </label>
             <Select
+              items={QUALITY_ITEMS}
               value={quality}
               onValueChange={(value) =>
                 setQuality(value as keyof typeof QUALITY_TO_MIN_HEIGHT)
@@ -113,11 +129,11 @@ export function Form({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="config">Auto</SelectItem>
-                <SelectItem value="sd_s">480p</SelectItem>
-                <SelectItem value="hd_s">720p</SelectItem>
-                <SelectItem value="fhd_s">1080p</SelectItem>
-                <SelectItem value="sd">480m</SelectItem>
+                {QUALITY_ITEMS.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

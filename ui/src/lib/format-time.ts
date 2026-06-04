@@ -1,4 +1,7 @@
 export function formatTime(seconds: number) {
+  if (seconds === 0) {
+    return "--:--";
+  }
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
   const secs = seconds % 60;
@@ -19,7 +22,7 @@ export function formatTime(seconds: number) {
  */
 export function getRelativeTimeString(
   timestamp: number,
-  lang = "en-US"
+  lang = "en-US",
 ): string {
   // Allow dates or times to be passed
   const timeMs = timestamp * 1000;
@@ -51,7 +54,7 @@ export function getRelativeTimeString(
 
   // Grab the ideal cutoff unit
   const unitIndex = cutoffs.findIndex(
-    (cutoff) => cutoff > Math.abs(deltaSeconds)
+    (cutoff) => cutoff > Math.abs(deltaSeconds),
   );
 
   // Get the divisor to divide from the seconds. E.g. if our unit is "day" our divisor

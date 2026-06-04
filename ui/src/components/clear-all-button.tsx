@@ -22,11 +22,13 @@ export function ClearAllButton({ show }: { show: boolean }) {
   return (
     <div className="flex justify-center">
       <AlertDialog>
-        <AlertDialogTrigger>
-          <Button size="sm" variant="ghost" className="text-muted-foreground">
-            <X /> Clear all
-          </Button>
-        </AlertDialogTrigger>
+        <AlertDialogTrigger
+          render={
+            <Button size="sm" variant="ghost" className="text-muted-foreground">
+              <X /> Clear all
+            </Button>
+          }
+        />
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>

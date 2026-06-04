@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { useRemoveHistoryEntryMutation } from "@/lib/commands";
+import { SafeImage } from "./safe-image";
 
 export function History({
   mutation,
@@ -59,15 +60,18 @@ function HistoryContainer({
   if (data) {
     return data.map((entry) => (
       <div className="flex items-center border rounded-md overflow-hidden gap-2 bg-white select-none">
-        <div className="w-36 self-stretch relative flex">
-          <img src={entry.thumbnail} className="h-full object-cover bg-muted" />
+        <div className="w-36 min-h-20 self-stretch relative flex bg-muted">
+          <SafeImage
+            src={entry.thumbnail}
+            className="h-full object-cover bg-muted"
+          />
 
           <p className="absolute right-1 bottom-1 text-xs text-white/80 border border-black/20 rounded-sm px-0.5 bg-black/50 ">
             {formatTime(entry.duration)}
           </p>
         </div>
         <div className="flex-1 py-3 pl-1">
-          <p className="leading-4 mb-0.5">{entry.title}</p>
+          <p className="leading-5 mb-0.5 line-clamp-2 ">{entry.title}</p>
           <p className="text-muted-foreground text-sm mb-0.5">
             {entry.channel}
           </p>
@@ -77,13 +81,16 @@ function HistoryContainer({
         </div>
         <div className="self-start">
           <DropdownMenu>
-            <DropdownMenuTrigger>
-              <Button variant="ghost" size="icon" className="size-8">
-                <ChevronDown />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuTrigger
+              render={
+                <Button variant="ghost" size="icon" className="size-8">
+                  <ChevronDown />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end" className="w-max min-w-max">
               <DropdownMenuItem
+                className="whitespace-nowrap"
                 onClick={() =>
                   mutation.mutate([
                     entry.job_type,
@@ -97,6 +104,7 @@ function HistoryContainer({
               </DropdownMenuItem>
               <DropdownMenuItem
                 variant="destructive"
+                className="whitespace-nowrap"
                 onClick={() => removeHistoryMutation.mutate(entry.webpage_url)}
               >
                 <Trash className="mr-1" />
