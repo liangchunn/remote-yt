@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{ffi::OsString, path::PathBuf};
 
 use glob::glob;
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,11 @@ use crate::{
 pub struct Video;
 
 impl Video {
+    fn log_command(binary: &str, args: &[OsString]) {
+        let args: Vec<_> = args.iter().map(|arg| arg.to_string_lossy()).collect();
+        info!(binary = %binary, args = ?args, "running command");
+    }
+
     async fn get_json(
         link: &str,
         format: Format,
@@ -22,18 +27,18 @@ impl Video {
         config: &Config,
     ) -> anyhow::Result<JsonDump> {
         let format = format.get_format_string(min_height);
-        info!(
-            "yt-dlp -f \"{}\" --skip-download --dump-json \"{}\"",
-            format, link
-        );
+        let args = vec![
+            OsString::from("-f"),
+            OsString::from(format),
+            OsString::from("--skip-download"),
+            OsString::from("--dump-json"),
+            OsString::from(link),
+        ];
+        Self::log_command(&config.yt_dlp_path, &args);
         let output = Command::new(&config.yt_dlp_path)
             // .arg("--impersonate")
             // .arg("Chrome")
-            .arg("-f")
-            .arg(format.clone())
-            .arg("--skip-download")
-            .arg("--dump-json")
-            .arg(link)
+            .args(&args)
             .output()
             .await?;
         let stdout = output.stdout;
@@ -57,14 +62,16 @@ impl Video {
         let provider = Self::find_provider_for_host(host, config)
             .ok_or_else(|| anyhow::anyhow!("provider not found for host: {}", host))?;
 
-        info!("{:#?}", provider.args);
-        info!("{url}");
+        let mut args = provider.args.iter().map(OsString::from).collect::<Vec<_>>();
+        args.extend([
+            OsString::from("--skip-download"),
+            OsString::from("--dump-json"),
+            OsString::from(url),
+        ]);
+        Self::log_command(&config.yt_dlp_path, &args);
 
         let output = Command::new(&config.yt_dlp_path)
-            .args(&provider.args)
-            .arg("--skip-download")
-            .arg("--dump-json")
-            .arg(url)
+            .args(&args)
             .output()
             .await?;
 
@@ -125,17 +132,22 @@ impl Video {
         min_height: MinHeight,
     ) -> anyhow::Result<()> {
         info!("starting download {link}");
-        let exit_staus = Command::new("/Users/liangchun/dev/ex/yt-dlp/yt-dlp.sh")
-            .arg("-f")
-            .arg(Format::Split.get_format_string(min_height))
-            .arg("--retries")
-            .arg("0")
-            .arg("--fragment-retries")
-            .arg("0")
-            .arg("--abort-on-unavailable-fragments")
-            .arg("-o")
-            .arg(temp_file.as_ref())
-            .arg(link)
+        let yt_dlp_path = "/Users/liangchun/dev/ex/yt-dlp/yt-dlp.sh";
+        let args = vec![
+            OsString::from("-f"),
+            OsString::from(Format::Split.get_format_string(min_height)),
+            OsString::from("--retries"),
+            OsString::from("0"),
+            OsString::from("--fragment-retries"),
+            OsString::from("0"),
+            OsString::from("--abort-on-unavailable-fragments"),
+            OsString::from("-o"),
+            temp_file.as_ref().as_os_str().to_os_string(),
+            OsString::from(link),
+        ];
+        Self::log_command(yt_dlp_path, &args);
+        let exit_staus = Command::new(yt_dlp_path)
+            .args(&args)
             .spawn()?
             .wait()
             .await?;
