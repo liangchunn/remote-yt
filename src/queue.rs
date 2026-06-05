@@ -1,12 +1,9 @@
-use std::{
-    collections::VecDeque,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-    },
-};
+use std::{collections::VecDeque, sync::Arc};
 
-use tokio::sync::{Mutex, Notify};
+use tokio::{
+    sync::{Mutex, Notify},
+    task::JoinHandle,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
@@ -18,12 +15,21 @@ use crate::{
 };
 
 struct QueueState {
-    queue: Mutex<VecDeque<Job>>,
+    data: Mutex<QueueData>,
     notify: Notify,
-    running: Mutex<Option<(Job, CancellationToken)>>,
-    clear_requested: AtomicBool,
-    job_id: AtomicUsize,
     history: Mutex<History>,
+}
+
+struct QueueData {
+    pending: VecDeque<Job>,
+    running: Option<RunningJob>,
+    next_job_id: usize,
+}
+
+#[derive(Clone)]
+struct RunningJob {
+    job: Job,
+    cancel_token: CancellationToken,
 }
 
 pub struct QueueManager {
@@ -32,145 +38,154 @@ pub struct QueueManager {
 
 impl QueueManager {
     pub fn new(history: History) -> Self {
-        let state = Arc::new(QueueState {
-            queue: Mutex::new(VecDeque::new()),
-            notify: Notify::new(),
-            running: Mutex::new(None),
-            clear_requested: AtomicBool::new(false),
-            job_id: AtomicUsize::new(1),
-            history: Mutex::new(history),
-        });
+        Self {
+            state: Arc::new(QueueState {
+                data: Mutex::new(QueueData {
+                    pending: VecDeque::new(),
+                    running: None,
+                    next_job_id: 1,
+                }),
+                notify: Notify::new(),
+                history: Mutex::new(history),
+            }),
+        }
+    }
 
-        let state_ref = state.clone();
-
+    pub fn start(&self) -> JoinHandle<()> {
+        let state = self.state.clone();
         tokio::spawn(async move {
-            loop {
+            Self::worker_loop(state).await;
+        })
+    }
+
+    async fn worker_loop(state: Arc<QueueState>) {
+        loop {
+            let (job, cancel_token) = loop {
+                let notified = state.notify.notified();
                 let job = {
-                    let mut q = state_ref.queue.lock().await;
-                    match q.pop_front() {
-                        Some(job) => job,
-                        None => {
-                            drop(q);
-                            state_ref.notify.notified().await;
-                            continue;
-                        }
-                    }
+                    let mut data = state.data.lock().await;
+                    data.pending.pop_front().map(|job| {
+                        let cancel_token = CancellationToken::new();
+                        data.running = Some(RunningJob {
+                            job: job.clone(),
+                            cancel_token: cancel_token.clone(),
+                        });
+                        (job, cancel_token)
+                    })
                 };
 
-                let job_type: JobTypeString = (&job.job_type).into();
-
-                info!("starting job...");
-
-                let cancel_token = CancellationToken::new();
-                {
-                    let mut lock = state_ref.running.lock().await;
-                    *lock = Some((job.clone(), cancel_token.clone()));
+                if let Some(job) = job {
+                    break job;
                 }
 
-                let metadata_clone = job.metadata.clone();
+                notified.await;
+            };
 
-                let mut child = match job.execute().await {
-                    Ok(child) => child,
-                    Err(e) => {
-                        error!("failed to start process: {e}");
-                        {
-                            let mut lock = state_ref.running.lock().await;
-                            *lock = None;
-                        }
-                        continue;
-                    }
-                };
+            let job_type: JobTypeString = (&job.job_type).into();
 
-                tokio::select! {
-                    result = child.wait() => {
-                        match result {
-                            Ok(status) => info!("task done: {status}"),
-                            Err(e) => error!("wait error: {e}"),
-                        }
-                    }
-                    _ = cancel_token.cancelled() => {
-                        info!("cancel requested, killing child...");
-                        let _ = child.kill().await;
+            info!(job_id = job.id, "starting job");
+
+            let metadata_clone = job.metadata.clone();
+            let job_id = job.id;
+
+            let mut child = match job.execute().await {
+                Ok(child) => child,
+                Err(e) => {
+                    error!(job_id, "failed to start process: {e}");
+                    Self::clear_running(&state, job_id).await;
+                    continue;
+                }
+            };
+
+            tokio::select! {
+                result = child.wait() => {
+                    match result {
+                        Ok(status) => info!(job_id, "task done: {status}"),
+                        Err(e) => error!(job_id, "wait error: {e}"),
                     }
                 }
-
-                {
-                    let mut lock = state_ref.history.lock().await;
-                    match lock.insert(metadata_clone, job_type) {
-                        Ok(()) => info!("history updated"),
-                        Err(e) => error!("failed to update history: {e}"),
-                    };
-                }
-
-                {
-                    let mut lock = state_ref.running.lock().await;
-                    *lock = None;
-                }
-
-                if state_ref.clear_requested.load(Ordering::SeqCst) {
-                    info!("clearing pending tasks...");
-                    {
-                        let mut q = state_ref.queue.lock().await;
-                        q.clear();
-                    }
-                    state_ref.clear_requested.store(false, Ordering::SeqCst);
+                _ = cancel_token.cancelled() => {
+                    info!(job_id, "cancel requested, killing child");
+                    let _ = child.kill().await;
                 }
             }
-        });
 
-        QueueManager { state }
+            {
+                let mut lock = state.history.lock().await;
+                match lock.insert(metadata_clone, job_type).await {
+                    Ok(()) => info!(job_id, "history updated"),
+                    Err(e) => error!(job_id, "failed to update history: {e}"),
+                };
+            }
+
+            Self::clear_running(&state, job_id).await;
+        }
+    }
+
+    async fn clear_running(state: &QueueState, job_id: usize) {
+        let mut data = state.data.lock().await;
+        if data
+            .running
+            .as_ref()
+            .is_some_and(|running| running.job.id == job_id)
+        {
+            data.running = None;
+        }
     }
 
     pub async fn submit(&self, args: JobType, metadata: TrackInfo) -> usize {
-        let id = self.state.job_id.fetch_add(1, Ordering::SeqCst);
+        let id = {
+            let mut data = self.state.data.lock().await;
+            let id = data.next_job_id;
+            data.next_job_id += 1;
 
-        let job = Job {
-            id,
-            metadata,
-            job_type: args,
+            data.pending.push_back(Job {
+                id,
+                metadata,
+                job_type: args,
+            });
+            id
         };
-        {
-            let mut q = self.state.queue.lock().await;
-            q.push_back(job);
-        }
+
         self.state.notify.notify_one();
         id
     }
 
     pub async fn cancel_by_id(&self, job_id: usize) -> bool {
-        {
-            let mut q = self.state.queue.lock().await;
-            let index = q.iter().position(|job| job.id == job_id);
+        let mut data = self.state.data.lock().await;
+        let index = data.pending.iter().position(|job| job.id == job_id);
 
-            if let Some(i) = index {
-                q.remove(i).expect("index from VecDeque::position is valid");
-                drop(q);
-
-                info!("cancelled job {job_id} from queue");
-                return true;
-            }
+        if let Some(i) = index {
+            data.pending
+                .remove(i)
+                .expect("index from VecDeque::position is valid");
+            info!(job_id, "cancelled job from queue");
+            return true;
         }
 
+        if data
+            .running
+            .as_ref()
+            .is_some_and(|running| running.job.id == job_id)
         {
-            let lock = self.state.running.lock().await;
-            if let Some((running_job, token)) = lock.as_ref()
-                && running_job.id == job_id
-            {
-                token.cancel();
-                info!("cancelled currently running job {job_id}");
-                return true;
-            }
+            let running = data
+                .running
+                .take()
+                .expect("running job checked as Some above");
+            running.cancel_token.cancel();
+            info!(job_id, "cancelled currently running job");
+            return true;
         }
 
-        info!("job {job_id} not found");
+        info!(job_id, "job not found");
         false
     }
 
     pub async fn cancel(&self) -> bool {
-        let mut lock = self.state.running.lock().await;
-        if let Some((job, token)) = lock.take() {
-            token.cancel();
-            info!("cancelling current job {}", job.id);
+        let mut data = self.state.data.lock().await;
+        if let Some(running) = data.running.take() {
+            running.cancel_token.cancel();
+            info!(job_id = running.job.id, "cancelling current job");
             true
         } else {
             info!("nothing to cancel");
@@ -179,57 +194,45 @@ impl QueueManager {
     }
 
     pub async fn clear(&self) {
-        {
-            let mut lock = self.state.running.lock().await;
-            if let Some((job, token)) = lock.take() {
-                token.cancel();
-                info!("clear: cancelling current job {}", job.id);
-            } else {
-                info!("nothing to clear");
-            }
+        let mut data = self.state.data.lock().await;
+        if let Some(running) = data.running.take() {
+            running.cancel_token.cancel();
+            info!(job_id = running.job.id, "clear: cancelling current job");
+        } else {
+            info!("nothing to clear");
         }
 
-        let mut q = self.state.queue.lock().await;
-        let drained_jobs: Vec<_> = q.drain(..).collect();
-        drop(q);
-
-        for job in drained_jobs {
-            info!("cancelled job {}", job.id);
+        for job in data.pending.drain(..) {
+            info!(job_id = job.id, "cancelled job");
         }
-
-        self.state.clear_requested.store(true, Ordering::SeqCst);
     }
 
     pub async fn inspect(&self) -> (Option<InspectMetadata>, Vec<InspectMetadata>) {
-        let current = self
-            .state
-            .running
-            .lock()
-            .await
-            .clone()
-            .map(|(job, _)| InspectMetadata {
-                job_id: job.id,
-                current: true,
-                track_info: job.metadata.clone(),
-            });
+        let data = self.state.data.lock().await;
+        let current = data.running.as_ref().map(|running| InspectMetadata {
+            job_id: running.job.id,
+            current: true,
+            track_info: running.job.metadata.clone(),
+        });
 
-        let mut curr_queue = vec![];
-        let queue = self.state.queue.lock().await;
-        for job in queue.iter() {
-            curr_queue.push(InspectMetadata {
+        let curr_queue = data
+            .pending
+            .iter()
+            .map(|job| InspectMetadata {
                 job_id: job.id,
                 current: false,
                 track_info: job.metadata.clone(),
-            });
-        }
+            })
+            .collect();
 
         (current, curr_queue)
     }
 
     pub async fn reorder_job(&self, job_id: usize, new_index: usize) -> anyhow::Result<()> {
-        let mut q = self.state.queue.lock().await;
+        let mut data = self.state.data.lock().await;
 
-        let old_pos = q
+        let old_pos = data
+            .pending
             .iter()
             .position(|job| job.id == job_id)
             .ok_or_else(|| anyhow::anyhow!("job {job_id} not found in queue or already running"))?;
@@ -238,45 +241,48 @@ impl QueueManager {
             return Ok(());
         }
 
-        let mut items: Vec<Job> = q.drain(..).collect();
+        let mut items: Vec<Job> = data.pending.drain(..).collect();
         let job = items.remove(old_pos);
         let target_index = new_index.min(items.len());
         items.insert(target_index, job);
-        q.extend(items);
+        data.pending.extend(items);
 
-        info!("reordered job {job_id} from position {old_pos} to position {new_index}");
+        info!(job_id, old_pos, new_index, "reordered job");
         Ok(())
     }
 
     pub async fn swap_with_running(&self, job_id: usize) -> anyhow::Result<()> {
-        let mut q = self.state.queue.lock().await;
+        let mut data = self.state.data.lock().await;
 
-        let target_index = q
+        let target_index = data
+            .pending
             .iter()
             .position(|job| job.id == job_id)
             .ok_or_else(|| anyhow::anyhow!("job {job_id} not found in queue"))?;
 
-        let running_lock = self.state.running.lock().await;
-        let (running_job, cancel_token) = running_lock
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no job is currently running"))?
-            .clone();
+        let running = data
+            .running
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("no job is currently running"))?;
 
-        if running_job.id == job_id {
+        if running.job.id == job_id {
+            data.running = Some(running);
             return Err(anyhow::anyhow!("cannot swap a job with itself"));
         }
 
-        let mut items: Vec<Job> = q.drain(..).collect();
-        let swapped_job = items.remove(target_index);
-        items.insert(0, swapped_job);
-        items.insert(target_index + 1, running_job.clone());
-        q.extend(items);
+        let swapped_job = data
+            .pending
+            .remove(target_index)
+            .expect("index from VecDeque::position is valid");
+        data.pending.push_front(swapped_job);
+        data.pending.insert(target_index + 1, running.job.clone());
 
-        cancel_token.cancel();
+        running.cancel_token.cancel();
 
         info!(
-            "swapped running job {} with queued job {}",
-            running_job.id, job_id
+            running_job_id = running.job.id,
+            queued_job_id = job_id,
+            "swapped running job with queued job"
         );
 
         Ok(())
@@ -286,9 +292,10 @@ impl QueueManager {
         let lock = self.state.history.lock().await;
         lock.get_history()
     }
+
     pub async fn remove_history_entry(&self, webpage_url: &str) -> anyhow::Result<()> {
         let mut lock = self.state.history.lock().await;
-        lock.remove(webpage_url)?;
+        lock.remove(webpage_url).await?;
         Ok(())
     }
 }

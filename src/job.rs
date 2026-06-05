@@ -80,7 +80,7 @@ impl Job {
                 let title = track.track_info.title.clone();
                 info!("starting {title}");
 
-                VlcClient::new(config.vlc_path.as_str())
+                VlcClient::new(config.vlc_path.as_str(), config.vlc_rpc.clone())
                     .oneshot(Track::Merged(track), &title)
                     .await
             }
@@ -105,7 +105,7 @@ impl Job {
                 let title = track.track_info.title.clone();
                 info!("starting {title}");
 
-                VlcClient::new(config.vlc_path.as_str())
+                VlcClient::new(config.vlc_path.as_str(), config.vlc_rpc.clone())
                     .oneshot(Track::Split(track), &title)
                     .await
             }
@@ -113,10 +113,10 @@ impl Job {
                 // the first run is just to get the title, we're running it again in case the URLs expire
                 let track = Video::get_track(&url, &config).await?;
 
-                let title = track.title();
+                let title = track.title().to_owned();
                 info!("starting {title}");
 
-                VlcClient::new(config.vlc_path.as_str())
+                VlcClient::new(config.vlc_path.as_str(), config.vlc_rpc.clone())
                     .oneshot(track, &title)
                     .await
             }

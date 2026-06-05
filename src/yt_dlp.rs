@@ -269,16 +269,16 @@ pub enum Track {
 }
 
 impl Track {
-    pub fn track_info(&self) -> Option<&TrackInfo> {
+    pub fn track_info(&self) -> &TrackInfo {
         match self {
-            Track::Merged(track) => Some(&track.track_info),
-            Track::Split(track) => Some(&track.track_info),
+            Track::Merged(track) => &track.track_info,
+            Track::Split(track) => &track.track_info,
         }
     }
-    pub fn title(&self) -> String {
+    pub fn title(&self) -> &str {
         match self {
-            Track::Merged(track) => track.track_info.title.clone(),
-            Track::Split(track) => track.track_info.title.clone(),
+            Track::Merged(track) => &track.track_info.title,
+            Track::Split(track) => &track.track_info.title,
         }
     }
 }

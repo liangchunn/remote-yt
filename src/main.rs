@@ -48,10 +48,18 @@ async fn main() -> anyhow::Result<()> {
     let history = History::new("history.json".into()).await?;
     let config = config::parse_config("config.toml")?;
 
+    let config = Arc::new(config);
+    let queue = Arc::new(QueueManager::new(history));
+    let _queue_worker = queue.start();
+
     let app_state = Arc::new(AppState {
-        queue: Arc::new(QueueManager::new(history)),
-        rpc: Arc::new(Rpc::new("127.0.0.1", 8081, "abc")),
-        config: Arc::new(config),
+        queue,
+        rpc: Arc::new(Rpc::new(
+            config.vlc_rpc.host.clone(),
+            config.vlc_rpc.port,
+            config.vlc_rpc.password.clone(),
+        )),
+        config,
     });
 
     let serve_app =
@@ -118,10 +126,7 @@ async fn queue_handler(
                         url: payload.url,
                         config: config.clone(),
                     },
-                    track
-                        .track_info()
-                        .expect("Queue job type always has track info")
-                        .to_owned(),
+                    track.track_info().to_owned(),
                 )
                 .await;
 

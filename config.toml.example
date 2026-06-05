@@ -1,5 +1,10 @@
-vlc_path = "vlc
+vlc_path = "vlc"
 yt_dlp_path = "yt-dlp"
+
+[vlc_rpc]
+host = "127.0.0.1"
+port = 8081
+password = "abc"
 
 [youtube]
 args = []

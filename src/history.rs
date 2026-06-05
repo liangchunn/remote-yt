@@ -35,7 +35,7 @@ impl History {
             Ok(str) => serde_json::from_str::<Vec<HistoryEntry>>(&str)?,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 let default_value: Vec<HistoryEntry> = Default::default();
-                std::fs::write(&history_file, serde_json::to_string(&default_value)?)?;
+                tokio::fs::write(&history_file, serde_json::to_string(&default_value)?).await?;
                 default_value
             }
             Err(e) => return Err(e.into()),
@@ -50,12 +50,16 @@ impl History {
         self.contents.clone()
     }
 
-    fn flush(&self) -> anyhow::Result<()> {
-        std::fs::write(&self.history_file, serde_json::to_string(&self.contents)?)?;
+    async fn flush(&self) -> anyhow::Result<()> {
+        tokio::fs::write(&self.history_file, serde_json::to_string(&self.contents)?).await?;
         Ok(())
     }
 
-    pub fn insert(&mut self, track_info: TrackInfo, job_type: JobTypeString) -> anyhow::Result<()> {
+    pub async fn insert(
+        &mut self,
+        track_info: TrackInfo,
+        job_type: JobTypeString,
+    ) -> anyhow::Result<()> {
         let inserted_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -82,18 +86,18 @@ impl History {
                 .split_off(self.contents.len().saturating_sub(MAX_HISTORY_LEN));
         }
 
-        self.flush()?;
+        self.flush().await?;
         Ok(())
     }
 
-    pub fn remove(&mut self, webpage_url: &str) -> anyhow::Result<()> {
+    pub async fn remove(&mut self, webpage_url: &str) -> anyhow::Result<()> {
         let index = self
             .contents
             .iter()
             .position(|content| content.track_info.webpage_url == webpage_url)
             .ok_or_else(|| anyhow::anyhow!("entry with webpage_url '{webpage_url}' not found"))?;
         self.contents.remove(index);
-        self.flush()?;
+        self.flush().await?;
 
         Ok(())
     }
