@@ -126,7 +126,7 @@ function toVolumePercent(volume: number) {
   return Math.round((clampedVolume / 255) * 100);
 }
 
-export function VolumeControl({ volumePercent }: { volumePercent: number }) {
+function VolumeControl({ volumePercent }: { volumePercent: number }) {
   const { setVolume } = usePlayerCommandsMutation();
   const [isOpen, setIsOpen] = useState(false);
   const [localVolume, setLocalVolume] = useState<number | null>(null);

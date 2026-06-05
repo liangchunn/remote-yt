@@ -18,8 +18,9 @@ function SafeImageInner({
   onError,
   ...props
 }: SafeImageProps) {
-  const [currentSrc, setCurrentSrc] = useState(src);
+  const [useFallback, setUseFallback] = useState(false);
   const [hidden, setHidden] = useState(false);
+  const currentSrc = useFallback && fallbackSrc ? fallbackSrc : src;
 
   if (hidden) return null;
 
@@ -31,8 +32,8 @@ function SafeImageInner({
       onError={(event) => {
         onError?.(event);
 
-        if (fallbackSrc && currentSrc !== fallbackSrc) {
-          setCurrentSrc(fallbackSrc);
+        if (fallbackSrc && !useFallback) {
+          setUseFallback(true);
         } else {
           setHidden(true);
         }

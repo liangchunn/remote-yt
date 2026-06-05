@@ -12,7 +12,7 @@ import {
   MouseSensor,
   type UniqueIdentifier,
 } from "@dnd-kit/core";
-import { useMemo, useState, type PropsWithChildren } from "react";
+import { useEffect, useRef, useState, type PropsWithChildren } from "react";
 import { useQueueMutations } from "@/lib/commands";
 import {
   arrayMove,
@@ -50,19 +50,21 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
     refetchInterval: 1000,
   });
 
-  const items = useMemo(() => data?.queue ?? [], [data]);
+  const items = data?.queue;
 
   const [localQueue, setLocalQueue] = useState<InspectItem[]>([]);
-  const [itemsId, setItemsId] = useState<string>("");
+  const itemsId = useRef("");
 
   // Create a stable ID based on the items to detect actual changes
-  const currentItemsId = items.map((item) => item.job_id).join(",");
+  const currentItemsId = items?.map((item) => item.job_id).join(",") ?? "";
 
   // Sync queue with items from server, but only when items actually change
-  if (currentItemsId !== itemsId) {
-    setItemsId(currentItemsId);
-    setLocalQueue(items);
-  }
+  useEffect(() => {
+    if (currentItemsId !== itemsId.current) {
+      itemsId.current = currentItemsId;
+      setLocalQueue(items ?? []);
+    }
+  }, [currentItemsId, items]);
 
   const queue = localQueue;
 
@@ -165,7 +167,7 @@ function DraggableItem({
   );
 }
 
-export function QueueItem({ item }: { item: InspectItem | null }) {
+function QueueItem({ item }: { item: InspectItem | null }) {
   const { cancel, swap } = useQueueMutations();
   const info = item?.track_info;
   return (

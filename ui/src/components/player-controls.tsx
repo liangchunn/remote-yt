@@ -1,5 +1,5 @@
 import { usePlayerCommandsMutation } from "@/lib/commands";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   SkipBack,
   Rewind,
@@ -17,10 +17,16 @@ export function PlayerControls({
   jobId: string | null;
   playerState: "playing" | "paused" | null;
 }) {
+  const queryClient = useQueryClient();
   const mutation = useMutation({
     mutationFn: (job_id: string) => {
       return fetch(`/api/cancel/${job_id}`, {
         method: "POST",
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["queue"],
       });
     },
   });

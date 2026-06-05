@@ -23,8 +23,9 @@ export function History({
   const [open, setOpen] = useLocalStorage("historyOpen", false);
   return (
     <div>
-      <div
-        className="flex justify-between items-center select-none cursor-pointer group"
+      <button
+        type="button"
+        className="flex w-full justify-between items-center select-none cursor-pointer group text-left"
         onClick={() => setOpen((open) => !open)}
       >
         <h1 className="text-lg font-semibold mb-1 tracking-tight group-hover:underline">
@@ -33,7 +34,7 @@ export function History({
         <ChevronDown
           className={clsx(open && "rotate-180", "size-4 transition")}
         />
-      </div>
+      </button>
       {open && (
         <div className="flex flex-col gap-2">
           <HistoryContainer mutation={mutation} />
@@ -59,7 +60,10 @@ function HistoryContainer({
   const removeHistoryMutation = useRemoveHistoryEntryMutation();
   if (data) {
     return data.map((entry) => (
-      <div className="flex items-center border rounded-md overflow-hidden gap-2 bg-white select-none">
+      <div
+        key={`${entry.webpage_url}-${entry.inserted_at}`}
+        className="flex items-center border rounded-md overflow-hidden gap-2 bg-white select-none"
+      >
         <div className="w-36 min-h-20 self-stretch relative flex bg-muted">
           <SafeImage
             src={entry.thumbnail}

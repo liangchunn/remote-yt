@@ -53,7 +53,11 @@ export function NowPlaying({
         )}
         <div className="relative">
           {info && (
-            <img src={info.thumbnail} className="aspect-video bg-muted" />
+            <img
+              src={info.thumbnail}
+              alt={`${info.title} thumbnail`}
+              className="aspect-video bg-muted"
+            />
           )}
           {playerState === null && item && (
             <div className="absolute w-full h-full top-0 left-0 select-none flex items-center justify-center">

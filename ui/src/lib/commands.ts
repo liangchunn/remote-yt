@@ -76,6 +76,11 @@ export function useQueueMutations() {
         method: "POST",
       });
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["queue"],
+      });
+    },
   });
 
   const swapMutation = useMutation({
@@ -84,12 +89,22 @@ export function useQueueMutations() {
         method: "POST",
       });
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["queue"],
+      });
+    },
   });
 
   const clearMutation = useMutation({
     mutationFn: () => {
       return fetch(`/api/clear`, {
         method: "POST",
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["queue"],
       });
     },
   });

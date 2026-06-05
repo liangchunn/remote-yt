@@ -1,3 +1,7 @@
+const relativeTimeFormatter = new Intl.RelativeTimeFormat("en-US", {
+  numeric: "auto",
+});
+
 export function formatTime(seconds: number) {
   if (seconds === 0) {
     return "--:--";
@@ -22,7 +26,6 @@ export function formatTime(seconds: number) {
  */
 export function getRelativeTimeString(
   timestamp: number,
-  lang = "en-US",
 ): string {
   // Allow dates or times to be passed
   const timeMs = timestamp * 1000;
@@ -62,6 +65,8 @@ export function getRelativeTimeString(
   const divisor = unitIndex ? cutoffs[unitIndex - 1] : 1;
 
   // Intl.RelativeTimeFormat do its magic
-  const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
-  return rtf.format(Math.floor(deltaSeconds / divisor), units[unitIndex]);
+  return relativeTimeFormatter.format(
+    Math.floor(deltaSeconds / divisor),
+    units[unitIndex],
+  );
 }
