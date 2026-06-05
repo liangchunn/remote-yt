@@ -62,8 +62,8 @@ async fn main() -> anyhow::Result<()> {
         config,
     });
 
-    let serve_app = ServeDir::new("ui-svelte/build")
-        .not_found_service(ServeFile::new("ui-svelte/build/index.html"));
+    let serve_app =
+        ServeDir::new("ui/dist").not_found_service(ServeFile::new("ui/dist/index.html"));
 
     let app = Router::new()
         .route("/api/queue", post(queue_handler))
