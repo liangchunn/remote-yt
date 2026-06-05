@@ -5,12 +5,6 @@ import type { JobType } from "./types/inspect";
 import { toast } from "sonner";
 import { History } from "./components/history";
 
-const API_MAP: Record<JobType, string> = {
-  QueueMerged: "/api/queue_merged",
-  QueueSplit: "/api/queue_split",
-  Queue: "/api/queue_config",
-};
-
 export default function App() {
   const queryClient = useQueryClient();
   const mutation = useMutation({
@@ -19,10 +13,11 @@ export default function App() {
       string,
       number,
     ]) => {
-      const resp = await fetch(API_MAP[job_type], {
+      const resp = await fetch("/api/queue", {
         method: "POST",
         body: JSON.stringify({
           url,
+          type: job_type,
           height: job_type === "Queue" ? undefined : min_height,
         }),
         headers: {

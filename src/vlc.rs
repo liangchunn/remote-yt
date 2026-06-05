@@ -14,7 +14,7 @@ impl VlcClient {
             binary_path: binary_path.into(),
         }
     }
-    pub async fn oneshot<'a>(&self, track: Track<'a>, title: &str) -> anyhow::Result<Child> {
+    pub async fn oneshot(&self, track: Track, title: &str) -> anyhow::Result<Child> {
         let binary_path = self.binary_path.clone();
         let mut child = Command::new(binary_path);
         child
@@ -36,7 +36,6 @@ impl VlcClient {
                 .arg("--input-slave")
                 .arg(split_track.audio_url)
                 .arg(split_track.video_url),
-            Track::File(file) => child.arg("--meta-title").arg(title).arg(file),
         };
 
         Ok(child.spawn()?)

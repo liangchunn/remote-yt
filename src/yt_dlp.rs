@@ -1,8 +1,6 @@
-use std::{ffi::OsString, path::PathBuf};
+use std::ffi::OsString;
 
-use glob::glob;
 use serde::{Deserialize, Serialize};
-use tempfile::NamedTempFile;
 use tokio::process::Command;
 use tracing::{error, info};
 use url::Url;
@@ -63,7 +61,7 @@ impl Video {
         Self::run_yt_dlp(config, &args).await
     }
 
-    pub async fn get_track<'a>(url: &str, config: &Config) -> anyhow::Result<Track<'a>> {
+    pub async fn get_track(url: &str, config: &Config) -> anyhow::Result<Track> {
         let parsed_url = Url::parse(url)?;
         let host = parsed_url
             .host_str()
@@ -120,68 +118,6 @@ impl Video {
     ) -> anyhow::Result<SplitTrack> {
         let json = Self::get_json(link, Format::Split, min_height, config).await?;
         json.try_into()
-    }
-
-    pub async fn download_file(
-        temp_file: &NamedTempFile,
-        link: &str,
-        min_height: MinHeight,
-        config: &Config,
-    ) -> anyhow::Result<()> {
-        info!("starting download {link}");
-        let yt_dlp_path = &config.yt_dlp_path;
-        let args = vec![
-            OsString::from("-f"),
-            OsString::from(Format::Split.format_string(min_height)),
-            OsString::from("--retries"),
-            OsString::from("0"),
-            OsString::from("--fragment-retries"),
-            OsString::from("0"),
-            OsString::from("--abort-on-unavailable-fragments"),
-            OsString::from("-o"),
-            temp_file.as_ref().as_os_str().to_os_string(),
-            OsString::from(link),
-        ];
-        Self::log_command(yt_dlp_path, &args);
-        let exit_staus = Command::new(yt_dlp_path)
-            .args(&args)
-            .spawn()?
-            .wait()
-            .await?;
-
-        if !exit_staus.success() {
-            return Err(anyhow::anyhow!("failed to download {}", link));
-        }
-
-        info!("download success {link}");
-
-        info!(
-            "moving file to correct path -> {}",
-            temp_file.as_ref().display()
-        );
-
-        let pattern = format!("{}.*", temp_file.as_ref().display());
-
-        let paths = glob(&pattern)?;
-        let mut path = None;
-        for p in paths {
-            match p {
-                Ok(p) => path = Some(p),
-                Err(e) => error!("glob error: {e}"),
-            }
-        }
-
-        let path = path
-            .ok_or_else(|| anyhow::anyhow!("downloaded file not found for pattern: {pattern}"))?;
-        match std::fs::rename(&path, temp_file.as_ref()) {
-            Ok(_) => {}
-            Err(e) => {
-                error!("failed to rename file: {e}");
-                return Err(anyhow::anyhow!("failed to rename file: {e}"));
-            }
-        };
-
-        Ok(())
     }
 }
 
@@ -327,29 +263,22 @@ pub struct TrackInfo {
     pub webpage_url: String,
 }
 
-pub enum Track<'a> {
+pub enum Track {
     Merged(MergedTrack),
     Split(SplitTrack),
-    File(&'a PathBuf),
 }
 
-impl<'a> Track<'a> {
+impl Track {
     pub fn track_info(&self) -> Option<&TrackInfo> {
         match self {
             Track::Merged(track) => Some(&track.track_info),
             Track::Split(track) => Some(&track.track_info),
-            Track::File(_) => None,
         }
     }
     pub fn title(&self) -> String {
         match self {
             Track::Merged(track) => track.track_info.title.clone(),
             Track::Split(track) => track.track_info.title.clone(),
-            Track::File(path) => path
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
         }
     }
 }

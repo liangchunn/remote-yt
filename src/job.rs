@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tokio::process::Child;
@@ -26,11 +26,6 @@ pub enum JobType {
         format_id: String,
         config: Arc<Config>,
     },
-    QueueFile {
-        title: String,
-        file: PathBuf,
-        config: Arc<Config>,
-    },
     Queue {
         url: String,
         config: Arc<Config>,
@@ -41,7 +36,6 @@ pub enum JobType {
 pub enum JobTypeString {
     QueueMerged,
     QueueSplit,
-    QueueFile,
     Queue,
 }
 
@@ -50,7 +44,6 @@ impl From<&JobType> for JobTypeString {
         match job_type {
             JobType::QueueMerged { .. } => JobTypeString::QueueMerged,
             JobType::QueueSplit { .. } => JobTypeString::QueueSplit,
-            JobType::QueueFile { .. } => JobTypeString::QueueFile,
             JobType::Queue { .. } => JobTypeString::Queue,
         }
     }
@@ -114,16 +107,6 @@ impl Job {
 
                 VlcClient::new(config.vlc_path.as_str())
                     .oneshot(Track::Split(track), &title)
-                    .await
-            }
-            JobType::QueueFile {
-                title,
-                file,
-                config,
-            } => {
-                info!("starting {title}");
-                VlcClient::new(config.vlc_path.as_str())
-                    .oneshot(Track::File(&file), &title)
                     .await
             }
             JobType::Queue { url, config } => {

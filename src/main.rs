@@ -10,7 +10,6 @@ use axum::{
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
-use tempfile::NamedTempFile;
 use tower_http::{
     compression::CompressionLayer,
     services::{ServeDir, ServeFile},
@@ -59,10 +58,7 @@ async fn main() -> anyhow::Result<()> {
         ServeDir::new("ui/dist").not_found_service(ServeFile::new("ui/dist/index.html"));
 
     let app = Router::new()
-        .route("/api/queue_config", post(queue_config_handler))
-        .route("/api/queue_merged", post(queue_merged_handler))
-        .route("/api/queue_split", post(queue_split_handler))
-        .route("/api/queue_file", post(queue_file_handler))
+        .route("/api/queue", post(queue_handler))
         .route("/api/cancel", post(cancel_current_handler))
         .route("/api/cancel/{id}", post(cancel_id_handler))
         .route("/api/clear", post(clear_handler))
@@ -83,8 +79,18 @@ async fn main() -> anyhow::Result<()> {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+enum QueueType {
+    Queue,
+    QueueMerged,
+    QueueSplit,
+}
+
+#[derive(Deserialize)]
 struct QueuePayload {
     url: String,
+    #[serde(rename = "type")]
+    queue_type: QueueType,
     height: Option<u32>,
 }
 
@@ -93,131 +99,82 @@ struct QueueResponse {
     job_id: usize,
 }
 
-async fn queue_config_handler(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<QueuePayload>,
-) -> Result<Json<QueueResponse>, AppError> {
-    let url = payload.url.clone();
-    info!("queueing {url}...");
-    let config = &state.config;
-    let track = Video::get_track(&url, config).await?;
-
-    let job_id = state
-        .queue
-        .submit(
-            job::JobType::Queue {
-                url: payload.url,
-                config: config.clone(),
-            },
-            track
-                .track_info()
-                .expect("Queue job type always has track info")
-                .to_owned(),
-        )
-        .await;
-
-    info!("queued {url} with job_id {job_id}");
-
-    Ok(Json(QueueResponse { job_id }))
-}
-
-async fn queue_merged_handler(
+async fn queue_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<QueuePayload>,
 ) -> Result<Json<QueueResponse>, AppError> {
     let url = payload.url.clone();
     info!("queueing {url}...");
 
-    let min_height = payload.height.map(MinHeight).unwrap_or_default();
+    match payload.queue_type {
+        QueueType::Queue => {
+            let config = &state.config;
+            let track = Video::get_track(&url, config).await?;
 
-    let merged_track = Video::get_merged_track(&payload.url, min_height, &state.config).await?;
+            let job_id = state
+                .queue
+                .submit(
+                    job::JobType::Queue {
+                        url: payload.url,
+                        config: config.clone(),
+                    },
+                    track
+                        .track_info()
+                        .expect("Queue job type always has track info")
+                        .to_owned(),
+                )
+                .await;
 
-    let format_id = merged_track.track_info.format_id.clone();
-    let track_info = merged_track.track_info;
+            info!("queued {url} with job_id {job_id}");
+            Ok(Json(QueueResponse { job_id }))
+        }
+        QueueType::QueueMerged => {
+            let min_height = payload.height.map(MinHeight).unwrap_or_default();
+            let merged_track =
+                Video::get_merged_track(&payload.url, min_height, &state.config).await?;
+            let format_id = merged_track.track_info.format_id.clone();
+            let track_info = merged_track.track_info;
 
-    let job_id = state
-        .queue
-        .submit(
-            job::JobType::QueueMerged {
-                url: payload.url,
-                height: payload.height,
-                format_id,
-                config: state.config.clone(),
-            },
-            track_info,
-        )
-        .await;
+            let job_id = state
+                .queue
+                .submit(
+                    job::JobType::QueueMerged {
+                        url: payload.url,
+                        height: payload.height,
+                        format_id,
+                        config: state.config.clone(),
+                    },
+                    track_info,
+                )
+                .await;
 
-    info!("queued {url} with job_id {job_id}");
+            info!("queued {url} with job_id {job_id}");
+            Ok(Json(QueueResponse { job_id }))
+        }
+        QueueType::QueueSplit => {
+            let min_height = payload.height.map(MinHeight).unwrap_or_default();
+            let split_track =
+                Video::get_split_track(&payload.url, min_height, &state.config).await?;
+            let format_id = split_track.track_info.format_id.clone();
+            let track_info = split_track.track_info;
 
-    Ok(Json(QueueResponse { job_id }))
-}
+            let job_id = state
+                .queue
+                .submit(
+                    job::JobType::QueueSplit {
+                        url: payload.url,
+                        height: payload.height,
+                        format_id,
+                        config: state.config.clone(),
+                    },
+                    track_info,
+                )
+                .await;
 
-async fn queue_split_handler(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<QueuePayload>,
-) -> Result<Json<QueueResponse>, AppError> {
-    let url = payload.url.clone();
-    info!("queueing {url}...");
-
-    let min_height = payload.height.map(MinHeight).unwrap_or_default();
-
-    let split_track = Video::get_split_track(&payload.url, min_height, &state.config).await?;
-
-    let format_id = split_track.track_info.format_id.clone();
-    let track_info = split_track.track_info;
-
-    let job_id = state
-        .queue
-        .submit(
-            job::JobType::QueueSplit {
-                url: payload.url,
-                height: payload.height,
-                format_id,
-                config: state.config.clone(),
-            },
-            track_info,
-        )
-        .await;
-
-    info!("queued {url} with job_id {job_id}");
-
-    Ok(Json(QueueResponse { job_id }))
-}
-
-async fn queue_file_handler(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<QueuePayload>,
-) -> Result<Json<QueueResponse>, AppError> {
-    let url = payload.url.clone();
-    info!("queueing {url}...");
-
-    let min_height = payload.height.map(MinHeight).unwrap_or_default();
-    let merged_track = Video::get_merged_track(&payload.url, min_height, &state.config).await?;
-
-    let track_info = merged_track.track_info;
-    let title = track_info.title.clone();
-
-    let mut temp_file = NamedTempFile::new().map_err(anyhow::Error::from)?;
-    temp_file.disable_cleanup(true);
-    let temp_file_clone = temp_file.as_ref().to_owned();
-    Video::download_file(&temp_file, &payload.url, min_height, &state.config).await?;
-
-    let job_id = state
-        .queue
-        .submit(
-            job::JobType::QueueFile {
-                title,
-                file: temp_file_clone,
-                config: state.config.clone(),
-            },
-            track_info,
-        )
-        .await;
-
-    info!("queued {url} with job_id {job_id}");
-
-    Ok(Json(QueueResponse { job_id }))
+            info!("queued {url} with job_id {job_id}");
+            Ok(Json(QueueResponse { job_id }))
+        }
+    }
 }
 
 async fn cancel_current_handler(State(state): State<Arc<AppState>>) -> &'static str {
