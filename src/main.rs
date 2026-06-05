@@ -39,7 +39,7 @@ mod yt_dlp;
 struct AppState {
     queue: Arc<QueueManager>,
     rpc: Arc<Rpc>,
-    config: config::Config,
+    config: Arc<config::Config>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -51,8 +51,8 @@ async fn main() -> anyhow::Result<()> {
 
     let app_state = Arc::new(AppState {
         queue: Arc::new(QueueManager::new(history)),
-        rpc: Arc::new(Rpc::new("127.0.0.1".into(), 8081, "abc".into())),
-        config,
+        rpc: Arc::new(Rpc::new("127.0.0.1", 8081, "abc")),
+        config: Arc::new(config),
     });
 
     let serve_app =
@@ -100,7 +100,7 @@ async fn queue_config_handler(
     let url = payload.url.clone();
     info!("queueing {url}...");
     let config = &state.config;
-    let track = Video::get_track(&url, &config).await?;
+    let track = Video::get_track(&url, config).await?;
 
     let job_id = state
         .queue
@@ -109,7 +109,10 @@ async fn queue_config_handler(
                 url: payload.url,
                 config: config.clone(),
             },
-            track.track_info().to_owned(),
+            track
+                .track_info()
+                .expect("Queue job type always has track info")
+                .to_owned(),
         )
         .await;
 
@@ -125,12 +128,9 @@ async fn queue_merged_handler(
     let url = payload.url.clone();
     info!("queueing {url}...");
 
-    let merged_track = Video::get_merged_track(
-        &payload.url,
-        MinHeight(payload.height.unwrap_or(480)),
-        &state.config,
-    )
-    .await?;
+    let min_height = payload.height.map(MinHeight).unwrap_or_default();
+
+    let merged_track = Video::get_merged_track(&payload.url, min_height, &state.config).await?;
 
     let format_id = merged_track.track_info.format_id.clone();
     let track_info = merged_track.track_info;
@@ -160,12 +160,9 @@ async fn queue_split_handler(
     let url = payload.url.clone();
     info!("queueing {url}...");
 
-    let split_track = Video::get_split_track(
-        &payload.url,
-        MinHeight(payload.height.unwrap_or(480)),
-        &state.config,
-    )
-    .await?;
+    let min_height = payload.height.map(MinHeight).unwrap_or_default();
+
+    let split_track = Video::get_split_track(&payload.url, min_height, &state.config).await?;
 
     let format_id = split_track.track_info.format_id.clone();
     let track_info = split_track.track_info;
@@ -195,17 +192,16 @@ async fn queue_file_handler(
     let url = payload.url.clone();
     info!("queueing {url}...");
 
-    let min_height = payload.height.unwrap_or(480);
-    let merged_track =
-        Video::get_merged_track(&payload.url, MinHeight(min_height), &state.config).await?;
+    let min_height = payload.height.map(MinHeight).unwrap_or_default();
+    let merged_track = Video::get_merged_track(&payload.url, min_height, &state.config).await?;
 
     let track_info = merged_track.track_info;
     let title = track_info.title.clone();
 
-    let mut temp_file = NamedTempFile::new().map_err(|e| anyhow::anyhow!(e))?;
+    let mut temp_file = NamedTempFile::new().map_err(anyhow::Error::from)?;
     temp_file.disable_cleanup(true);
     let temp_file_clone = temp_file.as_ref().to_owned();
-    Video::download_file(&temp_file, &payload.url, MinHeight(min_height)).await?;
+    Video::download_file(&temp_file, &payload.url, min_height, &state.config).await?;
 
     let job_id = state
         .queue
@@ -329,22 +325,18 @@ async fn remove_history_entry(
     Ok(())
 }
 
-// Wrapper type for anyhow::Error
 #[derive(Debug)]
 struct AppError(anyhow::Error);
 
-// Implement From<anyhow::Error> to allow easy conversion
 impl From<anyhow::Error> for AppError {
     fn from(err: anyhow::Error) -> Self {
         AppError(err)
     }
 }
 
-// Implement IntoResponse so Axum can convert your error into an HTTP response
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        // Customize this to return different status codes if needed
-        eprintln!("Internal error: {:?}", self.0); // Logging
+        error!(error = ?self.0, "internal error");
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({

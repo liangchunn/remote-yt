@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use tokio::process::Child;
@@ -18,22 +18,22 @@ pub enum JobType {
         url: String,
         height: Option<u32>,
         format_id: String,
-        config: Config,
+        config: Arc<Config>,
     },
     QueueSplit {
         url: String,
         height: Option<u32>,
         format_id: String,
-        config: Config,
+        config: Arc<Config>,
     },
     QueueFile {
         title: String,
         file: PathBuf,
-        config: Config,
+        config: Arc<Config>,
     },
     Queue {
         url: String,
-        config: Config,
+        config: Arc<Config>,
     },
 }
 
@@ -73,9 +73,8 @@ impl Job {
                 config,
             } => {
                 // the first run is just to get the title, we're running it again in case the URLs expire
-                let track =
-                    Video::get_merged_track(&url, MinHeight(height.unwrap_or(480)), &config)
-                        .await?;
+                let min_height = height.map(MinHeight).unwrap_or_default();
+                let track = Video::get_merged_track(&url, min_height, &config).await?;
 
                 let curr_format_id = track.track_info.format_id.clone();
                 if curr_format_id != format_id {
@@ -88,7 +87,7 @@ impl Job {
                 let title = track.track_info.title.clone();
                 info!("starting {title}");
 
-                VlcClient::new(config.vlc_path.into())
+                VlcClient::new(config.vlc_path.as_str())
                     .oneshot(Track::Merged(track), &title)
                     .await
             }
@@ -99,8 +98,8 @@ impl Job {
                 config,
             } => {
                 // the first run is just to get the title, we're running it again in case the URLs expire
-                let track =
-                    Video::get_split_track(&url, MinHeight(height.unwrap_or(480)), &config).await?;
+                let min_height = height.map(MinHeight).unwrap_or_default();
+                let track = Video::get_split_track(&url, min_height, &config).await?;
 
                 let curr_format_id = track.track_info.format_id.clone();
                 if curr_format_id != format_id {
@@ -113,7 +112,7 @@ impl Job {
                 let title = track.track_info.title.clone();
                 info!("starting {title}");
 
-                VlcClient::new(config.vlc_path.into())
+                VlcClient::new(config.vlc_path.as_str())
                     .oneshot(Track::Split(track), &title)
                     .await
             }
@@ -123,7 +122,7 @@ impl Job {
                 config,
             } => {
                 info!("starting {title}");
-                VlcClient::new(config.vlc_path.into())
+                VlcClient::new(config.vlc_path.as_str())
                     .oneshot(Track::File(&file), &title)
                     .await
             }
@@ -131,10 +130,10 @@ impl Job {
                 // the first run is just to get the title, we're running it again in case the URLs expire
                 let track = Video::get_track(&url, &config).await?;
 
-                let title = track.get_title();
+                let title = track.title();
                 info!("starting {title}");
 
-                VlcClient::new(config.vlc_path.into())
+                VlcClient::new(config.vlc_path.as_str())
                     .oneshot(track, &title)
                     .await
             }

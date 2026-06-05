@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -19,7 +21,7 @@ pub struct Provider {
     pub r#type: TrackType,
 }
 
-pub fn parse_config(file_path: &str) -> anyhow::Result<Config> {
+pub fn parse_config(file_path: impl AsRef<Path>) -> anyhow::Result<Config> {
     let config_content = std::fs::read_to_string(file_path)?;
     let config: Config = toml::from_str(&config_content)?;
     Ok(config)

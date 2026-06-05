@@ -20,37 +20,47 @@ impl Video {
         info!(binary = %binary, args = ?args, "running command");
     }
 
+    async fn run_yt_dlp(config: &Config, args: &[OsString]) -> anyhow::Result<JsonDump> {
+        Self::log_command(&config.yt_dlp_path, args);
+        let output = Command::new(&config.yt_dlp_path)
+            .args(args)
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            let err_msg = String::from_utf8_lossy(&output.stderr);
+            error!("yt-dlp error: {}", err_msg);
+            return Err(anyhow::anyhow!(
+                "yt-dlp failed with exit status {}: {}",
+                output.status,
+                err_msg,
+            ));
+        }
+
+        let stdout = output.stdout;
+        if stdout.is_empty() {
+            return Err(anyhow::anyhow!("yt-dlp produced no output"));
+        }
+        let json = String::from_utf8(stdout)?.trim().to_string();
+        let dump = serde_json::from_str::<JsonDump>(&json)?;
+        Ok(dump)
+    }
+
     async fn get_json(
         link: &str,
         format: Format,
         min_height: MinHeight,
         config: &Config,
     ) -> anyhow::Result<JsonDump> {
-        let format = format.get_format_string(min_height);
-        let args = vec![
+        let format_str = format.format_string(min_height);
+        let args = [
             OsString::from("-f"),
-            OsString::from(format),
+            OsString::from(format_str),
             OsString::from("--skip-download"),
             OsString::from("--dump-json"),
             OsString::from(link),
         ];
-        Self::log_command(&config.yt_dlp_path, &args);
-        let output = Command::new(&config.yt_dlp_path)
-            // .arg("--impersonate")
-            // .arg("Chrome")
-            .args(&args)
-            .output()
-            .await?;
-        let stdout = output.stdout;
-        let stderr = output.stderr;
-        if stdout.len() == 0 {
-            let err_msg = String::from_utf8(stderr)?;
-            error!("yt-dlp error: {}", err_msg);
-            return Err(anyhow::anyhow!("yt-dlp failed: {}", err_msg));
-        }
-        let json = String::from_utf8(stdout)?.trim().to_string();
-        let dump = serde_json::from_str::<JsonDump>(&json)?;
-        Ok(dump)
+        Self::run_yt_dlp(config, &args).await
     }
 
     pub async fn get_track<'a>(url: &str, config: &Config) -> anyhow::Result<Track<'a>> {
@@ -70,22 +80,8 @@ impl Video {
             OsString::from("--dump-json"),
             OsString::from(url),
         ]);
-        Self::log_command(&config.yt_dlp_path, &args);
 
-        let output = Command::new(&config.yt_dlp_path)
-            .args(&args)
-            .output()
-            .await?;
-
-        let stdout = output.stdout;
-        let stderr = output.stderr;
-        if stdout.len() == 0 {
-            let err_msg = String::from_utf8(stderr)?;
-            error!("yt-dlp error: {}", err_msg);
-            return Err(anyhow::anyhow!("yt-dlp failed: {}", err_msg));
-        }
-        let json = String::from_utf8(stdout)?.trim().to_string();
-        let dump = serde_json::from_str::<JsonDump>(&json)?;
+        let dump = Self::run_yt_dlp(config, &args).await?;
 
         let track = match provider.r#type {
             TrackType::Merged => {
@@ -102,12 +98,10 @@ impl Video {
     }
 
     fn find_provider_for_host<'a>(host: &str, config: &'a Config) -> Option<&'a Provider> {
-        for key in config.providers.keys() {
-            if host.contains(key) {
-                return config.providers.get(key);
-            }
-        }
-        None
+        config
+            .providers
+            .iter()
+            .find_map(|(key, provider)| host.contains(key).then_some(provider))
     }
 
     pub async fn get_merged_track(
@@ -132,12 +126,13 @@ impl Video {
         temp_file: &NamedTempFile,
         link: &str,
         min_height: MinHeight,
+        config: &Config,
     ) -> anyhow::Result<()> {
         info!("starting download {link}");
-        let yt_dlp_path = "/Users/liangchun/dev/ex/yt-dlp/yt-dlp.sh";
+        let yt_dlp_path = &config.yt_dlp_path;
         let args = vec![
             OsString::from("-f"),
-            OsString::from(Format::Split.get_format_string(min_height)),
+            OsString::from(Format::Split.format_string(min_height)),
             OsString::from("--retries"),
             OsString::from("0"),
             OsString::from("--fragment-retries"),
@@ -176,7 +171,9 @@ impl Video {
             }
         }
 
-        match std::fs::rename(path.unwrap(), temp_file.as_ref()) {
+        let path = path
+            .ok_or_else(|| anyhow::anyhow!("downloaded file not found for pattern: {pattern}"))?;
+        match std::fs::rename(&path, temp_file.as_ref()) {
             Ok(_) => {}
             Err(e) => {
                 error!("failed to rename file: {e}");
@@ -337,14 +334,14 @@ pub enum Track<'a> {
 }
 
 impl<'a> Track<'a> {
-    pub fn track_info(&self) -> &TrackInfo {
+    pub fn track_info(&self) -> Option<&TrackInfo> {
         match self {
-            Track::Merged(track) => &track.track_info,
-            Track::Split(track) => &track.track_info,
-            Track::File(_) => panic!("file track has no track info"),
+            Track::Merged(track) => Some(&track.track_info),
+            Track::Split(track) => Some(&track.track_info),
+            Track::File(_) => None,
         }
     }
-    pub fn get_title(&self) -> String {
+    pub fn title(&self) -> String {
         match self {
             Track::Merged(track) => track.track_info.title.clone(),
             Track::Split(track) => track.track_info.title.clone(),

@@ -13,7 +13,7 @@ pub enum Format {
 }
 
 impl Format {
-    pub fn get_format_string(&self, min_height: MinHeight) -> String {
+    pub fn format_string(&self, min_height: MinHeight) -> String {
         let min_height = min_height.0;
         match self {
             Format::Merged => format!("(mp4,webm)[height<={min_height}]"),

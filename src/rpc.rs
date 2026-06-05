@@ -37,7 +37,7 @@ pub enum RpcCommand {
 }
 
 impl RpcCommand {
-    fn to_query_string(&self) -> String {
+    fn to_query_string(&self) -> anyhow::Result<String> {
         let mut map: HashMap<&'static str, String> = HashMap::new();
         match self {
             RpcCommand::SeekForward => {
@@ -71,17 +71,18 @@ impl RpcCommand {
             }
         };
 
-        serde_urlencoded::to_string(map).unwrap()
+        Ok(serde_urlencoded::to_string(map)?)
     }
 }
 
 // https://github.com/videolan/vlc/tree/master/share/lua/http/requests
 impl Rpc {
-    pub fn new(host: String, port: u16, password: String) -> Self {
+    pub fn new(host: impl Into<String>, port: u16, password: impl Into<String>) -> Self {
+        let host = host.into();
         let url = format!("http://{host}:{port}/requests/status.json");
         Self {
             url,
-            password,
+            password: password.into(),
             client: Client::new(),
         }
     }
@@ -99,7 +100,7 @@ impl Rpc {
 
     pub async fn execute_command(&self, command: RpcCommand) -> anyhow::Result<()> {
         self.client
-            .get(format!("{}?{}", self.url, command.to_query_string()))
+            .get(format!("{}?{}", self.url, command.to_query_string()?))
             .basic_auth("", Some(&self.password))
             .send()
             .await?
