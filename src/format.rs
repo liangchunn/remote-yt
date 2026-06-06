@@ -23,3 +23,37 @@ impl Format {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn min_height_defaults_to_720() {
+        assert_eq!(MinHeight::default().0, 720);
+    }
+
+    #[test]
+    fn merged_format_string_uses_max_height_constraint() {
+        assert_eq!(
+            Format::Merged.format_string(MinHeight::default()),
+            "(mp4,webm)[height<=720]"
+        );
+        assert_eq!(
+            Format::Merged.format_string(MinHeight(1080)),
+            "(mp4,webm)[height<=1080]"
+        );
+    }
+
+    #[test]
+    fn split_format_string_uses_video_audio_fallbacks() {
+        assert_eq!(
+            Format::Split.format_string(MinHeight::default()),
+            "bv[vcodec^=avc1][height<=720]+ba[ext=m4a]/ba+bv[height<=720]"
+        );
+        assert_eq!(
+            Format::Split.format_string(MinHeight(480)),
+            "bv[vcodec^=avc1][height<=480]+ba[ext=m4a]/ba+bv[height<=480]"
+        );
+    }
+}

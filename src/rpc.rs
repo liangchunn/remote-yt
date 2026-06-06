@@ -108,3 +108,62 @@ impl Rpc {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn query(command: RpcCommand) -> HashMap<String, String> {
+        serde_urlencoded::from_str(&command.to_query_string().expect("query string"))
+            .expect("decode query string")
+    }
+
+    #[test]
+    fn seek_commands_encode_expected_queries() {
+        let forward = query(RpcCommand::SeekForward);
+        assert_eq!(forward.get("command").map(String::as_str), Some("seek"));
+        assert_eq!(forward.get("val").map(String::as_str), Some("+10"));
+
+        let rewind = query(RpcCommand::SeekRewind);
+        assert_eq!(rewind.get("command").map(String::as_str), Some("seek"));
+        assert_eq!(rewind.get("val").map(String::as_str), Some("-10"));
+
+        let seek_to = query(RpcCommand::SeekTo(42));
+        assert_eq!(seek_to.get("command").map(String::as_str), Some("seek"));
+        assert_eq!(seek_to.get("val").map(String::as_str), Some("42"));
+    }
+
+    #[test]
+    fn playback_and_fixed_volume_commands_encode_expected_queries() {
+        let pause = query(RpcCommand::TogglePause);
+        assert_eq!(pause.get("command").map(String::as_str), Some("pl_pause"));
+        assert!(!pause.contains_key("val"));
+
+        let mute = query(RpcCommand::Mute);
+        assert_eq!(mute.get("command").map(String::as_str), Some("volume"));
+        assert_eq!(mute.get("val").map(String::as_str), Some("0"));
+
+        let full_volume = query(RpcCommand::FullVolume);
+        assert_eq!(
+            full_volume.get("command").map(String::as_str),
+            Some("volume")
+        );
+        assert_eq!(full_volume.get("val").map(String::as_str), Some("255"));
+    }
+
+    #[test]
+    fn set_volume_clamps_percent_and_converts_to_vlc_scale() {
+        let zero = query(RpcCommand::SetVolume(0));
+        assert_eq!(zero.get("val").map(String::as_str), Some("0"));
+
+        let half = query(RpcCommand::SetVolume(50));
+        assert_eq!(half.get("command").map(String::as_str), Some("volume"));
+        assert_eq!(half.get("val").map(String::as_str), Some("128"));
+
+        let full = query(RpcCommand::SetVolume(100));
+        assert_eq!(full.get("val").map(String::as_str), Some("255"));
+
+        let clamped = query(RpcCommand::SetVolume(255));
+        assert_eq!(clamped.get("val").map(String::as_str), Some("255"));
+    }
+}

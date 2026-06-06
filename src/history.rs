@@ -102,3 +102,162 @@ impl History {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::yt_dlp::TrackInfo;
+
+    fn track_info(index: usize) -> TrackInfo {
+        serde_json::from_value(json!({
+            "title": format!("title {index}"),
+            "channel": "channel",
+            "uploader_id": "uploader",
+            "acodec": "aac",
+            "vcodec": "h264",
+            "height": 720,
+            "width": 1280,
+            "thumbnail": "https://example.com/thumb.jpg",
+            "track_type": "merged",
+            "format_id": "format",
+            "duration": 60,
+            "webpage_url": format!("https://example.com/watch/{index}"),
+        }))
+        .expect("valid track info")
+    }
+
+    #[tokio::test]
+    async fn new_creates_missing_history_file() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let history_file = temp_dir.path().join("history.json");
+
+        let history = History::new(history_file.clone())
+            .await
+            .expect("create history");
+
+        assert!(history_file.exists());
+        assert!(history.get_history().is_empty());
+        assert_eq!(
+            tokio::fs::read_to_string(history_file)
+                .await
+                .expect("read history file"),
+            "[]"
+        );
+    }
+
+    #[tokio::test]
+    async fn insert_persists_and_new_loads_existing_history() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let history_file = temp_dir.path().join("history.json");
+        let mut history = History::new(history_file.clone())
+            .await
+            .expect("create history");
+
+        history
+            .insert(track_info(1), JobTypeString::Queue)
+            .await
+            .expect("insert history entry");
+
+        let loaded = History::new(history_file).await.expect("load history");
+        let entries = loaded.get_history();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].track_info.title, "title 1");
+        assert_eq!(
+            entries[0].track_info.webpage_url,
+            "https://example.com/watch/1"
+        );
+    }
+
+    #[tokio::test]
+    async fn insert_replaces_duplicate_webpage_url_and_moves_it_to_end() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let history_file = temp_dir.path().join("history.json");
+        let mut history = History::new(history_file).await.expect("create history");
+        let mut duplicate = track_info(1);
+        duplicate.title = "updated title".to_owned();
+
+        history
+            .insert(track_info(1), JobTypeString::Queue)
+            .await
+            .expect("insert first entry");
+        history
+            .insert(track_info(2), JobTypeString::QueueSplit)
+            .await
+            .expect("insert second entry");
+        history
+            .insert(duplicate, JobTypeString::QueueMerged)
+            .await
+            .expect("replace duplicate entry");
+
+        let entries = history.get_history();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries[0].track_info.webpage_url,
+            "https://example.com/watch/2"
+        );
+        assert_eq!(
+            entries[1].track_info.webpage_url,
+            "https://example.com/watch/1"
+        );
+        assert_eq!(entries[1].track_info.title, "updated title");
+    }
+
+    #[tokio::test]
+    async fn insert_keeps_only_most_recent_entries() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let history_file = temp_dir.path().join("history.json");
+        let mut history = History::new(history_file).await.expect("create history");
+
+        for index in 0..105 {
+            history
+                .insert(track_info(index), JobTypeString::Queue)
+                .await
+                .expect("insert history entry");
+        }
+
+        let entries = history.get_history();
+        assert_eq!(entries.len(), 100);
+        assert_eq!(
+            entries[0].track_info.webpage_url,
+            "https://example.com/watch/5"
+        );
+        assert_eq!(
+            entries[99].track_info.webpage_url,
+            "https://example.com/watch/104"
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_deletes_entry_and_persists_change() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let history_file = temp_dir.path().join("history.json");
+        let mut history = History::new(history_file.clone())
+            .await
+            .expect("create history");
+
+        history
+            .insert(track_info(1), JobTypeString::Queue)
+            .await
+            .expect("insert first entry");
+        history
+            .insert(track_info(2), JobTypeString::Queue)
+            .await
+            .expect("insert second entry");
+
+        history
+            .remove("https://example.com/watch/1")
+            .await
+            .expect("remove history entry");
+        assert!(history.remove("missing").await.is_err());
+
+        let loaded = History::new(history_file).await.expect("reload history");
+        let entries = loaded.get_history();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].track_info.webpage_url,
+            "https://example.com/watch/2"
+        );
+    }
+}

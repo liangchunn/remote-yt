@@ -314,3 +314,173 @@ struct RequestedFormat {
     height: Option<u32>,
     width: Option<u32>,
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+    use crate::config::{Config, Provider, VlcRpcConfig};
+
+    fn json_dump() -> JsonDump {
+        JsonDump {
+            title: "video title".to_owned(),
+            requested_formats: None,
+            url: Some("https://media.example.com/video.mp4".to_owned()),
+            channel: Some("channel".to_owned()),
+            uploader: Some("uploader".to_owned()),
+            uploader_id: Some("uploader-id".to_owned()),
+            thumbnail: "https://example.com/thumb.jpg".to_owned(),
+            duration: Some(123),
+            acodec: Some("aac".to_owned()),
+            vcodec: Some("h264".to_owned()),
+            height: Some(720),
+            width: Some(1280),
+            format_id: "18".to_owned(),
+            webpage_url: "https://example.com/watch/1".to_owned(),
+        }
+    }
+
+    fn video_format(url: &str) -> RequestedFormat {
+        RequestedFormat {
+            url: url.to_owned(),
+            fps: Some(30.0),
+            acodec: "none".to_owned(),
+            vcodec: "h264".to_owned(),
+            height: Some(720),
+            width: Some(1280),
+        }
+    }
+
+    fn audio_format(url: &str) -> RequestedFormat {
+        RequestedFormat {
+            url: url.to_owned(),
+            fps: None,
+            acodec: "aac".to_owned(),
+            vcodec: "none".to_owned(),
+            height: None,
+            width: None,
+        }
+    }
+
+    fn config_with_providers(providers: HashMap<String, Provider>) -> Config {
+        Config {
+            vlc_path: "vlc".to_owned(),
+            yt_dlp_path: "yt-dlp".to_owned(),
+            vlc_rpc: VlcRpcConfig::default(),
+            providers,
+        }
+    }
+
+    #[test]
+    fn merged_json_converts_to_track_info() {
+        let track: MergedTrack = json_dump().try_into().expect("convert merged track");
+
+        assert_eq!(track.merged_url, "https://media.example.com/video.mp4");
+        assert_eq!(track.track_info.title, "video title");
+        assert_eq!(track.track_info.channel, "channel");
+        assert_eq!(track.track_info.uploader_id, "uploader-id");
+        assert_eq!(track.track_info.acodec, "aac");
+        assert_eq!(track.track_info.vcodec, "h264");
+        assert_eq!(track.track_info.height, Some(720));
+        assert_eq!(track.track_info.width, Some(1280));
+        assert!(matches!(track.track_info.track_type, TrackType::Merged));
+        assert_eq!(track.track_info.format_id, "18");
+        assert_eq!(track.track_info.duration, 123);
+        assert_eq!(track.track_info.webpage_url, "https://example.com/watch/1");
+    }
+
+    #[test]
+    fn merged_json_requires_media_url() {
+        let mut dump = json_dump();
+        dump.url = None;
+
+        let result = MergedTrack::try_from(dump);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn split_json_extracts_audio_and_video_formats() {
+        let mut dump = json_dump();
+        dump.url = None;
+        dump.requested_formats = Some(vec![
+            audio_format("https://media.example.com/audio.m4a"),
+            video_format("https://media.example.com/video.mp4"),
+        ]);
+
+        let track: SplitTrack = dump.try_into().expect("convert split track");
+
+        assert_eq!(track.audio_url, "https://media.example.com/audio.m4a");
+        assert_eq!(track.video_url, "https://media.example.com/video.mp4");
+        assert_eq!(track.track_info.acodec, "aac");
+        assert_eq!(track.track_info.vcodec, "h264");
+        assert_eq!(track.track_info.height, Some(720));
+        assert_eq!(track.track_info.width, Some(1280));
+        assert!(matches!(track.track_info.track_type, TrackType::Split));
+    }
+
+    #[test]
+    fn split_json_rejects_missing_or_malformed_requested_formats() {
+        let mut no_formats = json_dump();
+        no_formats.requested_formats = None;
+        assert!(SplitTrack::try_from(no_formats).is_err());
+
+        let mut too_many = json_dump();
+        too_many.requested_formats = Some(vec![
+            audio_format("https://media.example.com/audio.m4a"),
+            video_format("https://media.example.com/video.mp4"),
+            video_format("https://media.example.com/other.mp4"),
+        ]);
+        assert!(SplitTrack::try_from(too_many).is_err());
+
+        let mut missing_audio = json_dump();
+        missing_audio.requested_formats = Some(vec![
+            video_format("https://media.example.com/video-1.mp4"),
+            video_format("https://media.example.com/video-2.mp4"),
+        ]);
+        assert!(SplitTrack::try_from(missing_audio).is_err());
+    }
+
+    #[test]
+    fn provider_matching_uses_first_key_contained_in_host() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "youtube".to_owned(),
+            Provider {
+                args: vec!["--cookies".to_owned(), "cookies.txt".to_owned()],
+                format: "best".to_owned(),
+                r#type: TrackType::Merged,
+            },
+        );
+        providers.insert(
+            "vimeo".to_owned(),
+            Provider {
+                args: vec![],
+                format: "bestvideo+bestaudio".to_owned(),
+                r#type: TrackType::Split,
+            },
+        );
+        let config = config_with_providers(providers);
+
+        let provider =
+            Video::find_provider_for_host("www.youtube.com", &config).expect("provider found");
+
+        assert_eq!(provider.format, "best");
+        assert_eq!(provider.args, vec!["--cookies", "cookies.txt"]);
+        assert!(matches!(provider.r#type, TrackType::Merged));
+        assert!(Video::find_provider_for_host("example.com", &config).is_none());
+    }
+
+    #[tokio::test]
+    async fn get_track_errors_before_spawning_when_url_or_provider_is_invalid() {
+        let config = config_with_providers(HashMap::new());
+
+        assert!(Video::get_track("not a url", &config).await.is_err());
+        assert!(
+            Video::get_track("https://unsupported.example.com/watch/1", &config)
+                .await
+                .is_err()
+        );
+    }
+}
