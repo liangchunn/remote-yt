@@ -2,8 +2,9 @@ import { formatTime, getRelativeTimeString } from "@/lib/format-time";
 import type { HistoryEntry, JobType } from "@/types/inspect";
 import { useQuery, type UseMutationResult } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ChevronDown, ListEnd, Trash } from "lucide-react";
+import { ChevronDown, Copy, ListEnd, Trash } from "lucide-react";
 import { useLocalStorage } from "@uidotdev/usehooks";
+import { toast } from "sonner";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
@@ -105,6 +106,17 @@ function HistoryContainer({
               >
                 <ListEnd className="mr-1" />
                 Add to queue
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="whitespace-nowrap"
+                onClick={() =>
+                  navigator.clipboard
+                    .writeText(entry.webpage_url)
+                    .then(() => toast.success("URL copied"))
+                }
+              >
+                <Copy className="mr-1" />
+                Copy URL
               </DropdownMenuItem>
               <DropdownMenuItem
                 variant="destructive"
