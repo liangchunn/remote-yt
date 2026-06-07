@@ -10,7 +10,7 @@ use tracing::{error, info};
 
 use crate::{
     history::{History, HistoryEntry},
-    job::{Job, JobType, JobTypeString},
+    job::{Job, JobType, JobTypeString, StartedJob},
     meta::InspectMetadata,
     yt_dlp::TrackInfo,
 };
@@ -30,7 +30,12 @@ trait QueueChild: Send {
 }
 
 trait JobExecutor: Send + Sync {
-    fn execute(&self, job: Job) -> BoxFuture<'static, anyhow::Result<Box<dyn QueueChild>>>;
+    fn execute(&self, job: Job) -> BoxFuture<'static, anyhow::Result<StartedQueueJob>>;
+}
+
+struct StartedQueueJob {
+    child: Box<dyn QueueChild>,
+    metadata: TrackInfo,
 }
 
 struct ProcessChild(Child);
@@ -48,10 +53,13 @@ impl QueueChild for ProcessChild {
 struct ProcessJobExecutor;
 
 impl JobExecutor for ProcessJobExecutor {
-    fn execute(&self, job: Job) -> BoxFuture<'static, anyhow::Result<Box<dyn QueueChild>>> {
+    fn execute(&self, job: Job) -> BoxFuture<'static, anyhow::Result<StartedQueueJob>> {
         Box::pin(async move {
-            let child = job.execute().await?;
-            Ok(Box::new(ProcessChild(child)) as Box<dyn QueueChild>)
+            let StartedJob { child, metadata } = job.execute().await?;
+            Ok(StartedQueueJob {
+                child: Box::new(ProcessChild(child)) as Box<dyn QueueChild>,
+                metadata,
+            })
         })
     }
 }
@@ -126,11 +134,10 @@ impl QueueManager {
 
             info!(job_id = job.id, "starting job");
 
-            let metadata_clone = job.metadata.clone();
             let job_id = job.id;
 
-            let mut child = match state.executor.execute(job).await {
-                Ok(child) => child,
+            let mut started = match state.executor.execute(job).await {
+                Ok(started) => started,
                 Err(e) => {
                     error!(job_id, "failed to start process: {e}");
                     Self::clear_running(&state, job_id).await;
@@ -138,8 +145,11 @@ impl QueueManager {
                 }
             };
 
+            let metadata_clone = started.metadata.clone();
+            Self::update_running_metadata(&state, job_id, started.metadata).await;
+
             tokio::select! {
-                result = child.wait() => {
+                result = started.child.wait() => {
                     match result {
                         Ok(status) => info!(job_id, "task done: {status}"),
                         Err(e) => error!(job_id, "wait error: {e}"),
@@ -147,7 +157,7 @@ impl QueueManager {
                 }
                 _ = cancel_token.cancelled() => {
                     info!(job_id, "cancel requested, killing child");
-                    let _ = child.kill().await;
+                    let _ = started.child.kill().await;
                 }
             }
 
@@ -174,6 +184,17 @@ impl QueueManager {
         }
     }
 
+    async fn update_running_metadata(state: &QueueState, job_id: usize, metadata: TrackInfo) {
+        let mut data = state.data.lock().await;
+        if let Some(running) = data
+            .running
+            .as_mut()
+            .filter(|running| running.job.id == job_id)
+        {
+            running.job.metadata = metadata;
+        }
+    }
+
     pub async fn submit(&self, args: JobType, metadata: TrackInfo) -> usize {
         let id = {
             let mut data = self.state.data.lock().await;
@@ -190,6 +211,33 @@ impl QueueManager {
 
         self.state.notify.notify_one();
         id
+    }
+
+    pub async fn submit_many(&self, jobs: Vec<(JobType, TrackInfo)>) -> Vec<usize> {
+        if jobs.is_empty() {
+            return Vec::new();
+        }
+
+        let ids = {
+            let mut data = self.state.data.lock().await;
+            let mut ids = Vec::with_capacity(jobs.len());
+
+            for (job_type, metadata) in jobs {
+                let id = data.next_job_id;
+                data.next_job_id += 1;
+                ids.push(id);
+                data.pending.push_back(Job {
+                    id,
+                    metadata,
+                    job_type,
+                });
+            }
+
+            ids
+        };
+
+        self.state.notify.notify_one();
+        ids
     }
 
     pub async fn cancel_by_id(&self, job_id: usize) -> bool {
@@ -379,9 +427,10 @@ mod tests {
     }
 
     impl JobExecutor for MockExecutor {
-        fn execute(&self, job: Job) -> BoxFuture<'static, anyhow::Result<Box<dyn QueueChild>>> {
+        fn execute(&self, job: Job) -> BoxFuture<'static, anyhow::Result<StartedQueueJob>> {
             let tx = self.tx.clone();
             Box::pin(async move {
+                let metadata = job.metadata.clone();
                 let (finish_tx, finish_rx) = oneshot::channel();
                 let (killed_tx, killed_rx) = oneshot::channel();
                 tx.send(ExecutedJob {
@@ -390,19 +439,23 @@ mod tests {
                     killed: killed_rx,
                 })?;
 
-                Ok(Box::new(MockChild {
-                    finish_rx: Some(finish_rx),
-                    killed_tx: Some(killed_tx),
-                }) as Box<dyn QueueChild>)
+                Ok(StartedQueueJob {
+                    child: Box::new(MockChild {
+                        finish_rx: Some(finish_rx),
+                        killed_tx: Some(killed_tx),
+                    }) as Box<dyn QueueChild>,
+                    metadata,
+                })
             })
         }
     }
 
     impl JobExecutor for PendingExecutor {
-        fn execute(&self, job: Job) -> BoxFuture<'static, anyhow::Result<Box<dyn QueueChild>>> {
+        fn execute(&self, job: Job) -> BoxFuture<'static, anyhow::Result<StartedQueueJob>> {
             let pending_tx = self.pending_tx.clone();
             let executed_tx = self.executed_tx.clone();
             Box::pin(async move {
+                let metadata = job.metadata.clone();
                 let (allow_tx, allow_rx) = oneshot::channel();
                 pending_tx.send(PendingExecution {
                     job: job.clone(),
@@ -418,10 +471,13 @@ mod tests {
                     killed: killed_rx,
                 })?;
 
-                Ok(Box::new(MockChild {
-                    finish_rx: Some(finish_rx),
-                    killed_tx: Some(killed_tx),
-                }) as Box<dyn QueueChild>)
+                Ok(StartedQueueJob {
+                    child: Box::new(MockChild {
+                        finish_rx: Some(finish_rx),
+                        killed_tx: Some(killed_tx),
+                    }) as Box<dyn QueueChild>,
+                    metadata,
+                })
             })
         }
     }
@@ -584,6 +640,26 @@ mod tests {
             pending[2].track_info.webpage_url,
             "https://example.com/watch/3"
         );
+    }
+
+    #[tokio::test]
+    async fn submit_many_assigns_ids_and_appends_jobs_together() {
+        let (_temp_dir, manager, _rx) = mock_manager().await;
+
+        let first = manager.submit(job_type(1), track_info(1)).await;
+        let batch = manager
+            .submit_many(vec![
+                (job_type(2), track_info(2)),
+                (job_type(3), track_info(3)),
+            ])
+            .await;
+
+        assert_eq!(first, 1);
+        assert_eq!(batch, vec![2, 3]);
+
+        let (current, pending) = manager.inspect().await;
+        assert!(current.is_none());
+        assert_eq!(job_ids(&pending), vec![1, 2, 3]);
     }
 
     #[tokio::test]

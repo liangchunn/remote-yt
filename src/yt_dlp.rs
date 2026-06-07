@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::process::Command;
 use tracing::{error, info};
 use url::Url;
@@ -18,7 +18,10 @@ impl Video {
         info!(binary = %binary, args = ?args, "running command");
     }
 
-    async fn run_yt_dlp(config: &Config, args: &[OsString]) -> anyhow::Result<JsonDump> {
+    async fn run_yt_dlp<T: DeserializeOwned>(
+        config: &Config,
+        args: &[OsString],
+    ) -> anyhow::Result<T> {
         Self::log_command(&config.yt_dlp_path, args);
         let output = Command::new(&config.yt_dlp_path)
             .args(args)
@@ -40,7 +43,7 @@ impl Video {
             return Err(anyhow::anyhow!("yt-dlp produced no output"));
         }
         let json = String::from_utf8(stdout)?.trim().to_string();
-        let dump = serde_json::from_str::<JsonDump>(&json)?;
+        let dump = serde_json::from_str::<T>(&json)?;
         Ok(dump)
     }
 
@@ -79,7 +82,7 @@ impl Video {
             OsString::from(url),
         ]);
 
-        let dump = Self::run_yt_dlp(config, &args).await?;
+        let dump: JsonDump = Self::run_yt_dlp(config, &args).await?;
 
         let track = match provider.r#type {
             TrackType::Merged => {
@@ -119,6 +122,48 @@ impl Video {
         let json = Self::get_json(link, Format::Split, min_height, config).await?;
         json.try_into()
     }
+
+    pub async fn get_youtube_playlist(
+        url: &str,
+        config: &Config,
+    ) -> anyhow::Result<YouTubePlaylist> {
+        let parsed_url = Url::parse(url)?;
+        let host = parsed_url
+            .host_str()
+            .ok_or_else(|| anyhow::anyhow!("invalid url"))?;
+
+        if !is_youtube_host(host) {
+            return Err(anyhow::anyhow!(
+                "playlist support is limited to YouTube URLs"
+            ));
+        }
+
+        let has_playlist_id = parsed_url
+            .query_pairs()
+            .any(|(key, value)| key == "list" && !value.trim().is_empty());
+        if !has_playlist_id {
+            return Err(anyhow::anyhow!(
+                "YouTube playlist URL must include a list parameter"
+            ));
+        }
+
+        let provider = Self::find_provider_for_host(host, config)
+            .ok_or_else(|| anyhow::anyhow!("provider not found for host: {}", host))?;
+        let mut args = provider.args.iter().map(OsString::from).collect::<Vec<_>>();
+        args.extend([
+            OsString::from("--flat-playlist"),
+            OsString::from("--dump-single-json"),
+            OsString::from("--skip-download"),
+            OsString::from(url),
+        ]);
+
+        let dump: PlaylistJsonDump = Self::run_yt_dlp(config, &args).await?;
+        YouTubePlaylist::from_dump(dump, provider.r#type.clone())
+    }
+}
+
+fn is_youtube_host(host: &str) -> bool {
+    host == "youtu.be" || host == "youtube.com" || host.ends_with(".youtube.com")
 }
 
 #[derive(Debug)]
@@ -315,6 +360,106 @@ struct RequestedFormat {
     width: Option<u32>,
 }
 
+#[derive(Clone, Debug)]
+pub struct YouTubePlaylist {
+    pub id: String,
+    pub title: String,
+    pub webpage_url: String,
+    pub thumbnail: String,
+    pub total_duration: u32,
+    pub videos: Vec<PlaylistVideo>,
+}
+
+impl YouTubePlaylist {
+    fn from_dump(value: PlaylistJsonDump, track_type: TrackType) -> anyhow::Result<Self> {
+        let mut videos = Vec::with_capacity(value.entries.len());
+        let mut total_duration = 0;
+        let playlist_thumbnail = pick_thumbnail(&value.thumbnails).unwrap_or_default();
+        let channel = value.channel.or(value.uploader).unwrap_or_default();
+        let uploader_id = value.uploader_id.or(value.channel_id).unwrap_or_default();
+
+        for entry in value.entries {
+            let duration = entry.duration.unwrap_or_default() as u32;
+            total_duration += duration;
+            let thumbnail =
+                pick_thumbnail(&entry.thumbnails).unwrap_or_else(|| playlist_thumbnail.clone());
+
+            videos.push(PlaylistVideo {
+                url: entry.url.clone(),
+                track_info: TrackInfo {
+                    title: entry.title,
+                    channel: channel.clone(),
+                    uploader_id: uploader_id.clone(),
+                    acodec: String::new(),
+                    vcodec: String::new(),
+                    height: None,
+                    width: None,
+                    thumbnail,
+                    track_type: track_type.clone(),
+                    format_id: String::new(),
+                    duration,
+                    webpage_url: entry.url,
+                },
+            });
+        }
+
+        if videos.is_empty() {
+            return Err(anyhow::anyhow!("playlist contains no videos"));
+        }
+
+        Ok(Self {
+            id: value.id,
+            title: value.title,
+            webpage_url: value.webpage_url,
+            thumbnail: playlist_thumbnail,
+            total_duration,
+            videos,
+        })
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct PlaylistVideo {
+    pub url: String,
+    pub track_info: TrackInfo,
+}
+
+fn pick_thumbnail(thumbnails: &[Thumbnail]) -> Option<String> {
+    thumbnails
+        .iter()
+        .max_by_key(|thumbnail| thumbnail.width.unwrap_or_default())
+        .map(|thumbnail| thumbnail.url.clone())
+}
+
+#[derive(Deserialize)]
+struct PlaylistJsonDump {
+    id: String,
+    title: String,
+    channel: Option<String>,
+    channel_id: Option<String>,
+    uploader: Option<String>,
+    uploader_id: Option<String>,
+    #[serde(default)]
+    thumbnails: Vec<Thumbnail>,
+    entries: Vec<PlaylistEntryJson>,
+    webpage_url: String,
+}
+
+#[derive(Deserialize)]
+struct PlaylistEntryJson {
+    title: String,
+    url: String,
+    #[serde(default)]
+    thumbnails: Vec<Thumbnail>,
+    duration: Option<f64>,
+}
+
+#[derive(Deserialize)]
+struct Thumbnail {
+    url: String,
+    width: Option<u32>,
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -360,6 +505,13 @@ mod tests {
             vcodec: "none".to_owned(),
             height: None,
             width: None,
+        }
+    }
+
+    fn thumbnail(url: &str, width: u32) -> Thumbnail {
+        Thumbnail {
+            url: url.to_owned(),
+            width: Some(width),
         }
     }
 
@@ -470,6 +622,81 @@ mod tests {
         assert_eq!(provider.args, vec!["--cookies", "cookies.txt"]);
         assert!(matches!(provider.r#type, TrackType::Merged));
         assert!(Video::find_provider_for_host("example.com", &config).is_none());
+    }
+
+    #[test]
+    fn youtube_playlist_json_converts_to_playlist() {
+        let dump = PlaylistJsonDump {
+            id: "PL123".to_owned(),
+            title: "Playlist".to_owned(),
+            channel: Some("Playlist Channel".to_owned()),
+            channel_id: Some("channel-id".to_owned()),
+            uploader: None,
+            uploader_id: None,
+            thumbnails: vec![
+                thumbnail("https://example.com/small.jpg", 120),
+                thumbnail("https://example.com/large.jpg", 360),
+            ],
+            entries: vec![
+                PlaylistEntryJson {
+                    title: "First".to_owned(),
+                    url: "https://www.youtube.com/watch?v=one".to_owned(),
+                    thumbnails: vec![thumbnail("https://example.com/first.jpg", 480)],
+                    duration: Some(60.0),
+                },
+                PlaylistEntryJson {
+                    title: "Second".to_owned(),
+                    url: "https://www.youtube.com/watch?v=two".to_owned(),
+                    thumbnails: vec![],
+                    duration: Some(75.0),
+                },
+            ],
+            webpage_url: "https://www.youtube.com/playlist?list=PL123".to_owned(),
+        };
+
+        let playlist =
+            YouTubePlaylist::from_dump(dump, TrackType::Split).expect("convert playlist");
+
+        assert_eq!(playlist.id, "PL123");
+        assert_eq!(playlist.title, "Playlist");
+        assert_eq!(playlist.thumbnail, "https://example.com/large.jpg");
+        assert_eq!(playlist.total_duration, 135);
+        assert_eq!(playlist.videos.len(), 2);
+        assert_eq!(
+            playlist.videos[0].url,
+            "https://www.youtube.com/watch?v=one"
+        );
+        assert_eq!(playlist.videos[0].track_info.title, "First");
+        assert_eq!(playlist.videos[0].track_info.channel, "Playlist Channel");
+        assert_eq!(
+            playlist.videos[0].track_info.thumbnail,
+            "https://example.com/first.jpg"
+        );
+        assert_eq!(
+            playlist.videos[1].track_info.thumbnail,
+            "https://example.com/large.jpg"
+        );
+        assert!(matches!(
+            playlist.videos[0].track_info.track_type,
+            TrackType::Split
+        ));
+    }
+
+    #[test]
+    fn youtube_playlist_json_rejects_empty_playlists() {
+        let dump = PlaylistJsonDump {
+            id: "PL123".to_owned(),
+            title: "Playlist".to_owned(),
+            channel: None,
+            channel_id: None,
+            uploader: None,
+            uploader_id: None,
+            thumbnails: vec![],
+            entries: vec![],
+            webpage_url: "https://www.youtube.com/playlist?list=PL123".to_owned(),
+        };
+
+        assert!(YouTubePlaylist::from_dump(dump, TrackType::Merged).is_err());
     }
 
     #[tokio::test]

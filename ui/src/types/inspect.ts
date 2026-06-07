@@ -37,3 +37,18 @@ export type HistoryEntry = TrackInfo & {
 };
 
 export type JobType = "QueueMerged" | "QueueSplit" | "Queue";
+
+export type PlaylistEntry = {
+  id: string;
+  title: string;
+  webpage_url: string;
+  thumbnail: string;
+  video_count: number;
+  total_duration: number;
+  videos: PlaylistVideo[];
+};
+
+export type PlaylistVideo = {
+  url: string;
+  track_info: TrackInfo;
+};

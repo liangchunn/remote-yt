@@ -36,6 +36,7 @@ import { NowPlaying } from "./now-playing";
 import { ClearAllButton } from "./clear-all-button";
 import { formatTime } from "@/lib/format-time";
 import { SafeImage } from "./safe-image";
+import { SavedPlaylists } from "./saved-playlists";
 
 export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
   const { data, error } = useQuery({
@@ -138,6 +139,7 @@ export function Queue({ isMutationPending }: { isMutationPending: boolean }) {
         </div>
       )}
       <ClearAllButton show={!!nowPlaying || queue.length > 0} />
+      <SavedPlaylists />
     </div>
   );
 }

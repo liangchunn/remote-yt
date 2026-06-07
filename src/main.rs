@@ -18,16 +18,19 @@ use crate::{
     format::MinHeight,
     history::{History, HistoryEntry},
     meta::InspectMetadata,
+    playlist::{PlaylistEntry, PlaylistStore},
     queue::QueueManager,
     rpc::{Rpc, RpcCommand, RpcResponse},
     yt_dlp::Video,
 };
+use tokio::sync::Mutex;
 
 pub mod config;
 mod format;
 mod history;
 mod job;
 mod meta;
+mod playlist;
 mod queue;
 mod rpc;
 mod vlc;
@@ -35,6 +38,7 @@ mod yt_dlp;
 
 struct AppState {
     queue: Arc<QueueManager>,
+    playlists: Mutex<PlaylistStore>,
     rpc: Arc<Rpc>,
     config: Arc<config::Config>,
 }
@@ -44,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
     let history = History::new("history.json".into()).await?;
+    let playlists = PlaylistStore::new("playlists.json".into()).await?;
     let config = config::parse_config("config.toml")?;
 
     let config = Arc::new(config);
@@ -52,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app_state = Arc::new(AppState {
         queue,
+        playlists: Mutex::new(playlists),
         rpc: Arc::new(Rpc::new(
             config.vlc_rpc.host.clone(),
             config.vlc_rpc.port,
@@ -72,6 +78,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/execute_command", post(player_commands))
         .route("/api/swap/{id}", post(swap))
         .route("/api/move/{id}/{new_pos}", post(move_to))
+        .route("/api/playlists", get(get_playlists).post(add_playlist))
+        .route("/api/queue_playlist", post(queue_playlist))
+        .route("/api/remove_playlist", post(remove_playlist))
         .route("/api/history", get(get_history))
         .route("/api/remove_history", post(remove_history_entry))
         .layer(CompressionLayer::new())
@@ -103,6 +112,12 @@ struct QueuePayload {
 #[derive(Serialize)]
 struct QueueResponse {
     job_id: usize,
+}
+
+#[derive(Serialize)]
+struct PlaylistQueueResponse {
+    playlist: PlaylistEntry,
+    job_ids: Vec<usize>,
 }
 
 async fn queue_handler(
@@ -257,6 +272,98 @@ async fn move_to(
     state.queue.reorder_job(job_id, new_index).await?;
 
     Ok(Json(true))
+}
+
+async fn get_playlists(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<PlaylistEntry>>, AppError> {
+    let mut playlists = state.playlists.lock().await.list();
+    playlists.reverse();
+
+    Ok(Json(playlists))
+}
+
+#[derive(Deserialize)]
+struct PlaylistPayload {
+    url: String,
+}
+
+async fn add_playlist(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<PlaylistPayload>,
+) -> Result<Json<PlaylistQueueResponse>, AppError> {
+    let playlist =
+        PlaylistEntry::from(Video::get_youtube_playlist(&payload.url, &state.config).await?);
+    let jobs = build_playlist_jobs(&state, &playlist);
+
+    state
+        .playlists
+        .lock()
+        .await
+        .upsert(playlist.clone())
+        .await?;
+    let job_ids = state.queue.submit_many(jobs).await;
+
+    Ok(Json(PlaylistQueueResponse { playlist, job_ids }))
+}
+
+#[derive(Deserialize)]
+struct QueuePlaylistPayload {
+    playlist_url: String,
+}
+
+async fn queue_playlist(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<QueuePlaylistPayload>,
+) -> Result<Json<PlaylistQueueResponse>, AppError> {
+    let playlist = state
+        .playlists
+        .lock()
+        .await
+        .get(&payload.playlist_url)
+        .ok_or_else(|| anyhow::anyhow!("playlist not found"))?;
+    let jobs = build_playlist_jobs(&state, &playlist);
+    let job_ids = state.queue.submit_many(jobs).await;
+
+    Ok(Json(PlaylistQueueResponse { playlist, job_ids }))
+}
+
+fn build_playlist_jobs(
+    state: &AppState,
+    playlist: &PlaylistEntry,
+) -> Vec<(job::JobType, crate::yt_dlp::TrackInfo)> {
+    let mut jobs = Vec::with_capacity(playlist.videos.len());
+
+    for video in &playlist.videos {
+        jobs.push((
+            job::JobType::Queue {
+                url: video.url.clone(),
+                config: state.config.clone(),
+            },
+            video.track_info.clone(),
+        ));
+    }
+
+    jobs
+}
+
+#[derive(Deserialize)]
+struct RemovePlaylistPayload {
+    playlist_url: String,
+}
+
+async fn remove_playlist(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<RemovePlaylistPayload>,
+) -> Result<(), AppError> {
+    state
+        .playlists
+        .lock()
+        .await
+        .remove(&payload.playlist_url)
+        .await?;
+
+    Ok(())
 }
 
 async fn get_history(

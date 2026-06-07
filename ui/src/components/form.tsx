@@ -44,9 +44,12 @@ const QUALITY_ITEMS = [
 
 export function Form({
   mutation,
+  playlistMutation,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mutation: UseMutationResult<any, Error, [JobType, string, number], unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  playlistMutation: UseMutationResult<any, Error, string, unknown>;
 }) {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState("");
@@ -63,6 +66,11 @@ export function Form({
     const min_height = QUALITY_TO_MIN_HEIGHT[quality];
     setUrl("");
     setOpen(false);
+    if (isYouTubePlaylistUrl(url)) {
+      playlistMutation.mutate(url);
+      return;
+    }
+
     mutation.mutate([
       quality === "config"
         ? "Queue"
@@ -145,4 +153,17 @@ export function Form({
       </DialogContent>
     </Dialog>
   );
+}
+
+function isYouTubePlaylistUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    return (
+      (host === "youtu.be" || host === "youtube.com" || host.endsWith(".youtube.com")) &&
+      !!url.searchParams.get("list")
+    );
+  } catch {
+    return false;
+  }
 }

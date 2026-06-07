@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 type Command =
   | "SeekForward"
@@ -116,6 +117,68 @@ export function useQueueMutations() {
   const clear = () => clearMutation.mutate();
 
   return { reorder, cancel, swap, clear };
+}
+
+export function usePlaylistMutations() {
+  const queryClient = useQueryClient();
+
+  const queueMutation = useMutation({
+    mutationFn: async (playlist_url: string) => {
+      const resp = await fetch(`/api/queue_playlist`, {
+        method: "POST",
+        body: JSON.stringify({
+          playlist_url,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+      const json = await resp.json();
+      if (json.error) {
+        throw new Error(json.error);
+      }
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["queue"],
+      });
+    },
+    onError: (e) => {
+      toast.error(`Failed to queue playlist: ${e.message}`);
+    },
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: async (playlist_url: string) => {
+      const resp = await fetch(`/api/remove_playlist`, {
+        method: "POST",
+        body: JSON.stringify({
+          playlist_url,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+      if (!resp.ok) {
+        const json = await resp.json();
+        throw new Error(json.error ?? "failed to remove playlist");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["playlists"],
+      });
+    },
+    onError: (e) => {
+      toast.error(`Failed to remove playlist: ${e.message}`);
+    },
+  });
+
+  const queueAll = (playlistUrl: string) => queueMutation.mutate(playlistUrl);
+  const remove = (playlistUrl: string) => removeMutation.mutate(playlistUrl);
+
+  return { queueAll, remove };
 }
 
 export function useRemoveHistoryEntryMutation() {

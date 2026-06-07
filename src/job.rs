@@ -56,8 +56,13 @@ pub struct Job {
     pub job_type: JobType,
 }
 
+pub struct StartedJob {
+    pub child: Child,
+    pub metadata: TrackInfo,
+}
+
 impl Job {
-    pub async fn execute(self) -> anyhow::Result<Child> {
+    pub async fn execute(self) -> anyhow::Result<StartedJob> {
         match self.job_type {
             JobType::QueueMerged {
                 url,
@@ -80,9 +85,12 @@ impl Job {
                 let title = track.track_info.title.clone();
                 info!("starting {title}");
 
-                VlcClient::new(config.vlc_path.as_str(), config.vlc_rpc.clone())
+                let metadata = track.track_info.clone();
+                let child = VlcClient::new(config.vlc_path.as_str(), config.vlc_rpc.clone())
                     .oneshot(Track::Merged(track), &title)
-                    .await
+                    .await?;
+
+                Ok(StartedJob { child, metadata })
             }
             JobType::QueueSplit {
                 url,
@@ -105,20 +113,26 @@ impl Job {
                 let title = track.track_info.title.clone();
                 info!("starting {title}");
 
-                VlcClient::new(config.vlc_path.as_str(), config.vlc_rpc.clone())
+                let metadata = track.track_info.clone();
+                let child = VlcClient::new(config.vlc_path.as_str(), config.vlc_rpc.clone())
                     .oneshot(Track::Split(track), &title)
-                    .await
+                    .await?;
+
+                Ok(StartedJob { child, metadata })
             }
             JobType::Queue { url, config } => {
                 // the first run is just to get the title, we're running it again in case the URLs expire
                 let track = Video::get_track(&url, &config).await?;
 
                 let title = track.title().to_owned();
+                let metadata = track.track_info().to_owned();
                 info!("starting {title}");
 
-                VlcClient::new(config.vlc_path.as_str(), config.vlc_rpc.clone())
+                let child = VlcClient::new(config.vlc_path.as_str(), config.vlc_rpc.clone())
                     .oneshot(track, &title)
-                    .await
+                    .await?;
+
+                Ok(StartedJob { child, metadata })
             }
         }
     }
