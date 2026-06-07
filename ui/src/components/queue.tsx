@@ -1,7 +1,7 @@
 import type { InspectApi, InspectItem } from "@/types/inspect";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "./ui/button";
-import { LoaderCircle, Play, ChevronDown, Trash } from "lucide-react";
+import { LoaderCircle, Play, Trash, EllipsisIcon } from "lucide-react";
 import {
   DndContext,
   TouchSensor,
@@ -222,11 +222,11 @@ function QueueItem({ item }: { item: InspectItem | null }) {
                 className="size-8"
                 disabled={!item}
               >
-                <ChevronDown />
+                <EllipsisIcon />
               </Button>
             }
           />
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" className="w-max min-w-max">
             <DropdownMenuItem onClick={() => item && swap(item.job_id)}>
               <Play className="mr-1" />
               Play now

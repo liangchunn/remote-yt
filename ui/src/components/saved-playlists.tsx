@@ -1,6 +1,6 @@
 import type { PlaylistEntry } from "@/types/inspect";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Copy, ListEnd, RefreshCw, Trash } from "lucide-react";
+import { Copy, EllipsisIcon, ListEnd, RefreshCw, Trash } from "lucide-react";
 import { usePlaylistMutations } from "@/lib/commands";
 import { copyUrlToClipboard } from "@/lib/copy-url";
 import { Button } from "./ui/button";
@@ -62,7 +62,7 @@ function PlaylistItem({ playlist }: { playlist: PlaylistEntry }) {
           <DropdownMenuTrigger
             render={
               <Button variant="ghost" size="icon" className="size-8">
-                <ChevronDown />
+                <EllipsisIcon />
               </Button>
             }
           />

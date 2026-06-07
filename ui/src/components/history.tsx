@@ -2,7 +2,7 @@ import { formatTime, getRelativeTimeString } from "@/lib/format-time";
 import type { HistoryEntry, JobType } from "@/types/inspect";
 import { useQuery, type UseMutationResult } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ChevronDown, Copy, ListEnd, Trash } from "lucide-react";
+import { ChevronDown, Copy, EllipsisIcon, ListEnd, Trash } from "lucide-react";
 import { useState, type MouseEvent } from "react";
 import { useLocalStorage } from "@uidotdev/usehooks";
 import { Button } from "./ui/button";
@@ -151,7 +151,7 @@ function HistoryContainer({
                 <DropdownMenuTrigger
                   render={
                     <Button variant="ghost" size="icon" className="size-8">
-                      <ChevronDown />
+                      <EllipsisIcon />
                     </Button>
                   }
                 />
@@ -226,7 +226,8 @@ function HistoryContainer({
                   aria-disabled={currentPage === pageCount}
                   tabIndex={currentPage === pageCount ? -1 : undefined}
                   className={clsx(
-                    currentPage === pageCount && "pointer-events-none opacity-50",
+                    currentPage === pageCount &&
+                      "pointer-events-none opacity-50",
                   )}
                   onClick={(event) => goToPage(event, currentPage + 1)}
                 />
