@@ -1,8 +1,8 @@
 import type { PlaylistEntry } from "@/types/inspect";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, Copy, ListEnd, RefreshCw, Trash } from "lucide-react";
-import { toast } from "sonner";
 import { usePlaylistMutations } from "@/lib/commands";
+import { copyUrlToClipboard } from "@/lib/copy-url";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
@@ -76,11 +76,7 @@ function PlaylistItem({ playlist }: { playlist: PlaylistEntry }) {
             </DropdownMenuItem>
             <DropdownMenuItem
               className="whitespace-nowrap"
-              onClick={() =>
-                navigator.clipboard
-                  .writeText(playlist.webpage_url)
-                  .then(() => toast.success("URL copied"))
-              }
+              onClick={() => copyUrlToClipboard(playlist.webpage_url)}
             >
               <Copy className="mr-1" />
               Copy URL

@@ -5,7 +5,6 @@ import clsx from "clsx";
 import { ChevronDown, Copy, ListEnd, Trash } from "lucide-react";
 import { useState, type MouseEvent } from "react";
 import { useLocalStorage } from "@uidotdev/usehooks";
-import { toast } from "sonner";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
@@ -24,6 +23,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "./ui/pagination";
+import { copyUrlToClipboard } from "@/lib/copy-url";
 
 const HISTORY_PAGE_SIZE = 10;
 type HistoryPageItem = number | "ellipsis-start" | "ellipsis-end";
@@ -171,11 +171,7 @@ function HistoryContainer({
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="whitespace-nowrap"
-                    onClick={() =>
-                      navigator.clipboard
-                        .writeText(entry.webpage_url)
-                        .then(() => toast.success("URL copied"))
-                    }
+                    onClick={() => copyUrlToClipboard(entry.webpage_url)}
                   >
                     <Copy className="mr-1" />
                     Copy URL
