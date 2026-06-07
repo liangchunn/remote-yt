@@ -130,7 +130,7 @@ function HistoryContainer({
             <div className="w-36 min-h-20 self-stretch relative flex bg-muted">
               <SafeImage
                 src={entry.thumbnail}
-                className="h-full object-cover bg-muted"
+                className="h-full w-full object-cover bg-muted"
               />
 
               <p className="absolute right-1 bottom-1 text-xs text-white/80 border border-black/20 rounded-sm px-0.5 bg-black/50 ">

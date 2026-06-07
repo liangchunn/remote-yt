@@ -178,7 +178,7 @@ function QueueItem({ item }: { item: InspectItem | null }) {
         {info ? (
           <SafeImage
             src={info.thumbnail}
-            className="h-full object-cover bg-muted"
+            className="h-full w-full object-cover bg-muted"
           />
         ) : (
           <div className="w-36 object-cover bg-muted/95 ">

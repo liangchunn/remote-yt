@@ -56,7 +56,7 @@ export function NowPlaying({
             <img
               src={info.thumbnail}
               alt={`${info.title} thumbnail`}
-              className="aspect-video bg-muted"
+              className="aspect-video w-full object-cover bg-muted"
             />
           )}
           {playerState === null && item && (

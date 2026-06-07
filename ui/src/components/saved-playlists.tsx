@@ -46,7 +46,7 @@ function PlaylistItem({ playlist }: { playlist: PlaylistEntry }) {
       <div className="w-36 min-h-20 self-stretch relative flex bg-muted">
         <SafeImage
           src={playlist.thumbnail}
-          className="h-full object-cover bg-muted"
+          className="h-full w-full object-cover bg-muted"
         />
       </div>
       <div className="flex-1 py-3 pl-1">
