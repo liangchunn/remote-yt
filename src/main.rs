@@ -80,6 +80,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/move/{id}/{new_pos}", post(move_to))
         .route("/api/playlists", get(get_playlists).post(add_playlist))
         .route("/api/queue_playlist", post(queue_playlist))
+        .route("/api/refresh_playlist", post(refresh_playlist))
         .route("/api/remove_playlist", post(remove_playlist))
         .route("/api/history", get(get_history))
         .route("/api/remove_history", post(remove_history_entry))
@@ -326,6 +327,35 @@ async fn queue_playlist(
     let job_ids = state.queue.submit_many(jobs).await;
 
     Ok(Json(PlaylistQueueResponse { playlist, job_ids }))
+}
+
+#[derive(Deserialize)]
+struct RefreshPlaylistPayload {
+    playlist_url: String,
+}
+
+async fn refresh_playlist(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<RefreshPlaylistPayload>,
+) -> Result<Json<PlaylistEntry>, AppError> {
+    let playlist_url = state
+        .playlists
+        .lock()
+        .await
+        .get(&payload.playlist_url)
+        .ok_or_else(|| anyhow::anyhow!("playlist not found"))?
+        .webpage_url;
+
+    let playlist =
+        PlaylistEntry::from(Video::get_youtube_playlist(&playlist_url, &state.config).await?);
+    state
+        .playlists
+        .lock()
+        .await
+        .upsert(playlist.clone())
+        .await?;
+
+    Ok(Json(playlist))
 }
 
 fn build_playlist_jobs(

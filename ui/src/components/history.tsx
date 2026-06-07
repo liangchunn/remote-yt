@@ -125,7 +125,7 @@ function HistoryContainer({
         {pageEntries?.map((entry) => (
           <div
             key={`${entry.webpage_url}-${entry.inserted_at}`}
-            className="flex items-center border rounded-md overflow-hidden gap-2 bg-white select-none"
+            className="flex items-center border rounded-md overflow-hidden gap-2 bg-card text-card-foreground select-none"
           >
             <div className="w-36 min-h-20 self-stretch relative flex bg-muted">
               <SafeImage

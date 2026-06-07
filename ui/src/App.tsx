@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { JobType } from "./types/inspect";
 import { toast } from "sonner";
 import { History } from "./components/history";
+import { ModeToggle } from "./components/mode-toggle";
 
 export default function App() {
   const queryClient = useQueryClient();
@@ -70,7 +71,8 @@ export default function App() {
   });
   return (
     <div className="p-4 m-auto max-w-lg pt-4 flex flex-col gap-4 mb-24">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <ModeToggle />
         <Form mutation={queueMutation} playlistMutation={playlistMutation} />
       </div>
       <Queue

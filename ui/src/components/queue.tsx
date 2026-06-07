@@ -163,7 +163,7 @@ function DraggableItem({
         {...listeners}
         className="absolute top-0 left-0 w-36 h-full select-none touch-none cursor-grab"
       >
-        <div className="flex items-center justify-center h-full w-[calc(100%+1px)] rounded-tl-md rounded-bl-md hover:bg-white/50 active:bg-white/50 transition"></div>
+        <div className="flex items-center justify-center h-full w-[calc(100%+1px)] rounded-tl-md rounded-bl-md hover:bg-muted/60 active:bg-muted/60 transition"></div>
       </div>
     </div>
   );
@@ -173,7 +173,7 @@ function QueueItem({ item }: { item: InspectItem | null }) {
   const { cancel, swap } = useQueueMutations();
   const info = item?.track_info;
   return (
-    <div className="flex items-center border rounded-md overflow-hidden gap-2 bg-white select-none">
+    <div className="flex items-center border rounded-md overflow-hidden gap-2 bg-card text-card-foreground select-none">
       <div className="w-36 min-h-20 self-stretch relative flex">
         {info ? (
           <SafeImage

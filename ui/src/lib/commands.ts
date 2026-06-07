@@ -175,10 +175,39 @@ export function usePlaylistMutations() {
     },
   });
 
+  const refreshMutation = useMutation({
+    mutationFn: async (playlist_url: string) => {
+      const resp = await fetch(`/api/refresh_playlist`, {
+        method: "POST",
+        body: JSON.stringify({
+          playlist_url,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+      const json = await resp.json();
+      if (json.error) {
+        throw new Error(json.error);
+      }
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["playlists"],
+      });
+      toast.success("Playlist refreshed");
+    },
+    onError: (e) => {
+      toast.error(`Failed to refresh playlist: ${e.message}`);
+    },
+  });
+
   const queueAll = (playlistUrl: string) => queueMutation.mutate(playlistUrl);
   const remove = (playlistUrl: string) => removeMutation.mutate(playlistUrl);
+  const refresh = (playlistUrl: string) => refreshMutation.mutate(playlistUrl);
 
-  return { queueAll, remove };
+  return { queueAll, remove, refresh };
 }
 
 export function useRemoveHistoryEntryMutation() {

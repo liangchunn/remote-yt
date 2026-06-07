@@ -40,7 +40,7 @@ export function NowPlaying({
         className={clsx(
           !isGreyBorder && [style.shiny, "border-transparent"],
           isGreyBorder && "border-muted-background",
-          "border-[3px] border-solid rounded-md overflow-hidden relative transition-transform",
+          "border-[3px] border-solid rounded-md overflow-hidden relative bg-card text-card-foreground transition-transform",
           playerState?.state === "paused" ? "scale-99" : "scale-100"
         )}
       >
